@@ -49,29 +49,34 @@ extract_gemini_key() {
   awk 'found {print; exit} /Clave de API/ {found=1}' "$SECRET_FILE" | tr -d '\r\n'
 }
 
-require_cmd gh
 require_cmd git
 
-printf '[1/8] Checking GitHub CLI auth...\n'
-gh auth status >/dev/null
-
-printf '[2/8] Creating new GitHub repo %s if needed...\n' "$REPO_FULL"
-if gh repo view "$REPO_FULL" >/dev/null 2>&1; then
-  echo "Repo already exists: $REPO_FULL"
+if [ "${SKIP_GITHUB:-0}" = "1" ]; then
+  printf '[1-3/8] Skipping GitHub repo creation/push because SKIP_GITHUB=1...\n'
+  git remote -v || true
 else
-  gh repo create "$REPO_FULL" \
-    --private \
-    --description "Personal OpenClaw assistant on Railway with Gemini and Discord"
-fi
+  require_cmd gh
+  printf '[1/8] Checking GitHub CLI auth...\n'
+  gh auth status >/dev/null
 
-printf '[3/8] Pushing local repo to GitHub...\n'
-if git remote get-url origin >/dev/null 2>&1; then
-  git remote set-url origin "https://github.com/${REPO_FULL}.git"
-else
-  git remote add origin "https://github.com/${REPO_FULL}.git"
+  printf '[2/8] Creating new GitHub repo %s if needed...\n' "$REPO_FULL"
+  if gh repo view "$REPO_FULL" >/dev/null 2>&1; then
+    echo "Repo already exists: $REPO_FULL"
+  else
+    gh repo create "$REPO_FULL" \
+      --private \
+      --description "Personal OpenClaw assistant on Railway with Gemini and Discord"
+  fi
+
+  printf '[3/8] Pushing local repo to GitHub...\n'
+  if git remote get-url origin >/dev/null 2>&1; then
+    git remote set-url origin "https://github.com/${REPO_FULL}.git"
+  else
+    git remote add origin "https://github.com/${REPO_FULL}.git"
+  fi
+  git branch -M main
+  git push -u origin main
 fi
-git branch -M main
-git push -u origin main
 
 printf '[4/8] Checking Railway CLI auth...\n'
 railway_cmd whoami >/dev/null
