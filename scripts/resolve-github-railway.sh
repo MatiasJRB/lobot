@@ -82,10 +82,21 @@ printf '[4/8] Checking Railway CLI auth...\n'
 railway_cmd whoami >/dev/null
 
 printf '[5/8] Creating/linking Railway project...\n'
-if [ ! -d .railway ]; then
-  railway_cmd init --name "$PROJECT_NAME" --json | redact || railway_cmd link
+if railway_cmd status >/dev/null 2>&1; then
+  echo "Railway project already linked:"
+  railway_cmd status | redact
+elif [ -n "${RAILWAY_PROJECT_ID:-}" ]; then
+  railway_cmd link \
+    --project "$RAILWAY_PROJECT_ID" \
+    ${RAILWAY_SERVICE_ID:+--service "$RAILWAY_SERVICE_ID"} \
+    ${RAILWAY_ENVIRONMENT:+--environment "$RAILWAY_ENVIRONMENT"} \
+    ${RAILWAY_WORKSPACE:+--workspace "$RAILWAY_WORKSPACE"} \
+    --json | redact
 else
-  echo "Railway project already linked in .railway"
+  railway_cmd init \
+    --name "$PROJECT_NAME" \
+    ${RAILWAY_WORKSPACE:+--workspace "$RAILWAY_WORKSPACE"} \
+    --json | redact || railway_cmd link ${RAILWAY_WORKSPACE:+--workspace "$RAILWAY_WORKSPACE"}
 fi
 
 printf '[6/8] Creating/linking Railway service...\n'

@@ -16,10 +16,5 @@
     "node-pty": "^1.0.0",
     "ws": "^8.18.0"
   },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "node-pty"
-    ]
-  },
   "description": "Personal OpenClaw assistant for Railway with Gemini and Discord notifications"
 }

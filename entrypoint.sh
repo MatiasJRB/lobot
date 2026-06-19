@@ -24,12 +24,18 @@ fi
 echo "[entrypoint] installing ${OPENCLAW_INSTALL_SPEC}"
 npm install -g "$OPENCLAW_INSTALL_SPEC"
 
+STATE_DIR="${OPENCLAW_STATE_DIR:-/data/.openclaw}"
 WORKSPACE_DIR="${OPENCLAW_WORKSPACE_DIR:-/data/workspace}"
-mkdir -p "$WORKSPACE_DIR"
+mkdir -p "$STATE_DIR" "$STATE_DIR/npm" "$STATE_DIR/npm/projects" "$WORKSPACE_DIR"
 if [ -d /app/seed-workspace ]; then
   echo "[entrypoint] seeding workspace defaults into ${WORKSPACE_DIR} (non-destructive)"
   cp -an /app/seed-workspace/. "$WORKSPACE_DIR"/
 fi
-chown -R openclaw:openclaw "$WORKSPACE_DIR"
+# Railway volumes may preserve dirs from failed prior boots; repair them every boot.
+chown -R openclaw:openclaw /data "$STATE_DIR" "$WORKSPACE_DIR" /home/openclaw || true
+chmod 700 /data "$STATE_DIR" "$WORKSPACE_DIR" || true
+find "$STATE_DIR" "$WORKSPACE_DIR" -type d -exec chmod u+rwx {} + 2>/dev/null || true
+find "$STATE_DIR" "$WORKSPACE_DIR" -type f -exec chmod u+rw {} + 2>/dev/null || true
+ls -ld /data "$STATE_DIR" "$STATE_DIR/npm" "$STATE_DIR/npm/projects" "$WORKSPACE_DIR"
 
 exec gosu openclaw node src/server.js
