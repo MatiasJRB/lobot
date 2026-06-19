@@ -1,0 +1,3 @@
+[mcp_servers.railway]
+command = "/bin/bash"
+args = ["/Users/matiasrios/Documents/GitHub/clawbot-personal-openclaw/scripts/railway-mcp.sh"]
