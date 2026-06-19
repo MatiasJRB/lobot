@@ -1,0 +1,11 @@
+.git
+node_modules
+.env
+.env.*
+!.env.example
+.DS_Store
+*.log
+*.tar.gz
+*.zip
+personal-assistant-secrets
+../personal-assistant-secrets
