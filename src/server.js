@@ -252,13 +252,13 @@ async function syncGatewayRuntimeConfig() {
     clawArgs([
       "config",
       "set",
+      "--json",
       "gateway.auth.token",
-      OPENCLAW_GATEWAY_TOKEN,
+      JSON.stringify(envSecretRef("OPENCLAW_GATEWAY_TOKEN")),
     ]),
-    { secrets: [OPENCLAW_GATEWAY_TOKEN] },
   );
   if (tokenResult.code === 0) {
-    console.log("gateway", "synced gateway.auth.token from OPENCLAW_GATEWAY_TOKEN");
+    console.log("gateway", "synced gateway.auth.token SecretRef from OPENCLAW_GATEWAY_TOKEN");
   } else {
     console.warn("gateway", `failed to sync gateway.auth.token (exit=${tokenResult.code})`);
   }
@@ -931,9 +931,11 @@ app.post("/setup/api/run", requireSetupAuth, async (req, res) => {
         clawArgs([
           "config",
           "set",
+          "--json",
           "gateway.auth.token",
-          OPENCLAW_GATEWAY_TOKEN,
+          JSON.stringify(envSecretRef("OPENCLAW_GATEWAY_TOKEN")),
         ]),
+        { secrets: [OPENCLAW_GATEWAY_TOKEN] },
       );
       extra += `[config] gateway.auth.token exit=${tokenResult.code}\n`;
 
