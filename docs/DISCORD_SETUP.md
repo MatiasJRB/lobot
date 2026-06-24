@@ -51,7 +51,10 @@ Copiar IDs con Developer Mode:
 
 Cuando el setup base ya está configurado, no uses `/setup/api/run` para Discord
 porque ese endpoint no rerunea onboarding. Usá los endpoints idempotentes del
-wrapper:
+wrapper. El wrapper además habilita explícitamente `plugins.entries.discord.enabled=true`
+y escribe `channels.discord.token` como valor plaintext tomado de `DISCORD_BOT_TOKEN`
+(en los logs sale redacted): en este deploy el monitor inbound de Discord no puede
+resolver el token si queda como SecretRef.
 
 ```bash
 # Configura channels.discord desde variables Railway/env y reinicia gateway.
@@ -72,5 +75,5 @@ Todos requieren Basic Auth con `SETUP_PASSWORD`.
 ## Seguridad
 
 - Usar un token nuevo; no reutilizar webhooks/tokens viejos encontrados en repos.
-- En Railway usar variable `DISCORD_BOT_TOKEN`; el wrapper configura OpenClaw con SecretRef para no guardar plaintext si no pegás el token en la UI.
-- Mantener `dmPolicy=pairing` y `groupPolicy=allowlist`.
+- En Railway usar variable `DISCORD_BOT_TOKEN`; el wrapper la copia a `channels.discord.token` como plaintext redacted para que el listener inbound arranque. No imprimir el token y rotarlo si se filtra.
+- Para el servidor privado personal actual, mantener `groupPolicy=open`, `dmPolicy=allowlist` y `allowFrom` limitado a `DISCORD_OWNER_USER_ID`.

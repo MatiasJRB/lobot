@@ -88,6 +88,7 @@ no acepta/cancela eventos y no modifica issues/PRs.
 ## Mantenimiento
 
 - Después de upgrades: `openclaw doctor --fix`.
+- Si Discord outbound funciona pero inbound no responde, revisar que `plugins.entries.discord.enabled=true`, que `channels.discord.token` sea string plaintext redacted (no SecretRef) y que el gateway arranque con `discord` en la lista de plugins.
 - Revisar `/setup/api/debug` si algo falla.
 - Revisar `/setup/api/crons` para ver digests instalados.
 - Revisar `/setup/api/personal/sources/status` si un digest reporta cobertura faltante.

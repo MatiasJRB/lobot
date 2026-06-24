@@ -1016,6 +1016,23 @@ async function setChannelConfig(name, cfgObj, opts = {}) {
   };
 }
 
+async function ensureDiscordPluginEnabled() {
+  const result = await runCmd(
+    OPENCLAW_NODE,
+    clawArgs([
+      "config",
+      "set",
+      "--json",
+      "plugins.entries.discord.enabled",
+      "true",
+    ]),
+  );
+  return {
+    ok: result.code === 0,
+    output: `\n[discord plugin enable] exit=${result.code}\n${result.output || ""}`,
+  };
+}
+
 function discordDeliveryTargetFromEnv() {
   return (
     envValue("DISCORD_PERSONAL_CHANNEL_TARGET") ||
@@ -1369,7 +1386,9 @@ app.post("/setup/api/run", requireSetupAuth, async (req, res) => {
       const discordPayloadToken = payload.discordToken?.trim() || "";
       const discordEnvToken = envValue("DISCORD_BOT_TOKEN");
       if (discordPayloadToken || discordEnvToken) {
-        const discordToken = discordPayloadToken || envSecretRef("DISCORD_BOT_TOKEN");
+        const plugin = await ensureDiscordPluginEnabled();
+        extra += plugin.output;
+        const discordToken = discordPayloadToken || discordEnvToken;
         extra += await configureChannel(
           "discord",
           buildDiscordChannelConfig(discordToken),
@@ -1485,8 +1504,13 @@ app.post("/setup/api/configure-discord", requireSetupAuth, async (req, res) => {
       });
     }
 
-    const discordToken =
-      discordPayloadToken || envSecretRef("DISCORD_BOT_TOKEN");
+    // Discord inbound currently cannot resolve SecretRef tokens inside the
+    // channel monitor runtime in this Railway/OpenClaw deployment. Keep the
+    // OpenClaw channel token as a plaintext config value sourced from Railway
+    // env (redacted from logs) so the gateway listener can start reliably.
+    const discordToken = discordPayloadToken || discordEnvToken;
+
+    const plugin = await ensureDiscordPluginEnabled();
     const result = await setChannelConfig(
       "discord",
       buildDiscordChannelConfig(discordToken, {
@@ -1495,15 +1519,16 @@ app.post("/setup/api/configure-discord", requireSetupAuth, async (req, res) => {
       { secrets: [discordPayloadToken, discordEnvToken].filter(Boolean) },
     );
 
-    let output = result.output;
-    if (result.ok) {
+    let output = plugin.output + result.output;
+    const ok = plugin.ok && result.ok;
+    if (ok) {
       output += "\n[setup] Restarting gateway so Discord config is active...\n";
       await restartGateway();
       output += "[setup] Gateway restarted.\n";
     }
 
-    return res.status(result.ok ? 200 : 500).json({
-      ok: result.ok,
+    return res.status(ok ? 200 : 500).json({
+      ok,
       output,
     });
   } catch (err) {
