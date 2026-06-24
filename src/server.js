@@ -72,6 +72,7 @@ const INTERNAL_GATEWAY_PORT = Number.parseInt(
 );
 const INTERNAL_GATEWAY_HOST = process.env.INTERNAL_GATEWAY_HOST ?? "127.0.0.1";
 const GATEWAY_TARGET = `http://${INTERNAL_GATEWAY_HOST}:${INTERNAL_GATEWAY_PORT}`;
+const GATEWAY_WS_TARGET = `ws://${INTERNAL_GATEWAY_HOST}:${INTERNAL_GATEWAY_PORT}`;
 
 const OPENCLAW_ENTRY =
   process.env.OPENCLAW_ENTRY?.trim() || "/openclaw/dist/entry.js";
@@ -808,7 +809,14 @@ async function installPersonalDigestCrons(opts = {}) {
 
   const list = await runCmd(
     OPENCLAW_NODE,
-    clawArgs(["cron", "list", "--token", OPENCLAW_GATEWAY_TOKEN]),
+    clawArgs([
+      "cron",
+      "list",
+      "--url",
+      GATEWAY_WS_TARGET,
+      "--token",
+      OPENCLAW_GATEWAY_TOKEN,
+    ]),
     { secrets: [OPENCLAW_GATEWAY_TOKEN] },
   );
   let output = `[cron list] exit=${list.code}\n${list.output || ""}\n`;
@@ -836,6 +844,8 @@ async function installPersonalDigestCrons(opts = {}) {
       channel,
       "--to",
       target,
+      "--url",
+      GATEWAY_WS_TARGET,
       "--token",
       OPENCLAW_GATEWAY_TOKEN,
     ];
@@ -1207,10 +1217,7 @@ app.post("/setup/api/discord/test", requireSetupAuth, async (req, res) => {
         target,
         "--message",
         message,
-        "--token",
-        OPENCLAW_GATEWAY_TOKEN,
       ]),
-      { secrets: [OPENCLAW_GATEWAY_TOKEN] },
     );
     return res.status(result.code === 0 ? 200 : 500).json({
       ok: result.code === 0,
