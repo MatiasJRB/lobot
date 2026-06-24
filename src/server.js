@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 import express from "express";
 import httpProxy from "http-proxy";
@@ -770,7 +771,91 @@ function isPairingRequiredOutput(output) {
   return /\b(device\s+)?pairing required\b/i.test(String(output || ""));
 }
 
+let cachedDevicePairingRuntime = null;
+
+async function loadDevicePairingRuntime() {
+  if (cachedDevicePairingRuntime) return cachedDevicePairingRuntime;
+
+  const distDir = path.dirname(OPENCLAW_ENTRY);
+  const fileName =
+    fs
+      .readdirSync(distDir)
+      .find((name) => /^device-pairing-[A-Za-z0-9_-]+\.js$/.test(name)) ||
+    "device-pairing-C4Uu7tKB.js";
+  const modulePath = path.join(distDir, fileName);
+  const mod = await import(pathToFileURL(modulePath).href);
+  const listDevicePairing = mod.listDevicePairing || mod.l;
+  const approveDevicePairing = mod.approveDevicePairing || mod.n;
+
+  if (typeof listDevicePairing !== "function" || typeof approveDevicePairing !== "function") {
+    throw new Error(`OpenClaw device-pairing runtime exports not found in ${modulePath}`);
+  }
+
+  cachedDevicePairingRuntime = { listDevicePairing, approveDevicePairing };
+  return cachedDevicePairingRuntime;
+}
+
+function stripSensitivePairingFields(value) {
+  return JSON.parse(
+    JSON.stringify(value, (key, current) => {
+      if (key === "token") return undefined;
+      if (/token/i.test(key) && typeof current === "string") return "[REDACTED]";
+      return current;
+    }),
+  );
+}
+
+function summarizePairingApproval(result) {
+  if (!result || typeof result !== "object") return result;
+  const device = result.device || {};
+  return {
+    status: result.status,
+    reason: result.reason,
+    scope: result.scope,
+    requestId: result.requestId,
+    device: device.deviceId
+      ? {
+        deviceId: device.deviceId,
+        platform: device.platform,
+        clientId: device.clientId,
+        clientMode: device.clientMode,
+        roles: device.roles,
+        scopes: device.scopes,
+        approvedScopes: device.approvedScopes,
+        tokens: device.tokens
+          ? Object.fromEntries(
+            Object.entries(device.tokens).map(([role, token]) => [
+              role,
+              {
+                role: token?.role,
+                scopes: token?.scopes,
+                createdAtMs: token?.createdAtMs,
+                rotatedAtMs: token?.rotatedAtMs,
+                revokedAtMs: token?.revokedAtMs,
+              },
+            ]),
+          )
+          : undefined,
+      }
+      : undefined,
+  };
+}
+
 async function listDevicePairingRequests() {
+  try {
+    const { listDevicePairing } = await loadDevicePairingRuntime();
+    const data = stripSensitivePairingFields(
+      await listDevicePairing(STATE_DIR),
+    );
+    return {
+      result: { code: 0, output: JSON.stringify(data, null, 2) },
+      data,
+      pending: pendingDeviceRequestsFromPayload(data),
+    };
+  } catch (err) {
+    console.warn(`[devices] local pairing list failed; falling back to CLI: ${err.message}`);
+  }
+
   const result = await runCmd(
     OPENCLAW_NODE,
     clawArgs(gatewayRpcArgs(["devices", "list"], { json: true })),
@@ -783,6 +868,23 @@ async function listDevicePairingRequests() {
     console.warn(`[devices] failed to parse JSON list output: ${err.message}`);
   }
   return { result, data, pending: pendingDeviceRequestsFromPayload(data) };
+}
+
+async function approveDevicePairingRequestLocally(requestId) {
+  const { approveDevicePairing } = await loadDevicePairingRuntime();
+  const result = await approveDevicePairing(
+    requestId,
+    {
+      callerScopes: [
+        "operator.admin",
+        "operator.pairing",
+        "operator.read",
+        "operator.write",
+      ],
+    },
+    STATE_DIR,
+  );
+  return summarizePairingApproval(stripSensitivePairingFields(result));
 }
 
 async function approveLatestPendingDeviceRequest(reason = "gateway command") {
@@ -799,21 +901,22 @@ async function approveLatestPendingDeviceRequest(reason = "gateway command") {
     }
 
     const requestId = String(request.requestId);
-    const approved = await runCmd(
-      OPENCLAW_NODE,
-      clawArgs(
-        gatewayRpcArgs(["devices", "approve", requestId], { json: true }),
-      ),
-      { secrets: [OPENCLAW_GATEWAY_TOKEN] },
-    );
-    output += `[pairing:approve attempt=${attempt}] requestId=${requestId} exit=${approved.code}\n${approved.output || ""}\n`;
+    try {
+      const approved = await approveDevicePairingRequestLocally(requestId);
+      output += `[pairing:approve-local attempt=${attempt}] requestId=${requestId}\n${JSON.stringify(approved, null, 2)}\n`;
 
-    if (approved.code === 0) {
-      return { ok: true, output };
-    }
+      if (approved?.status === "approved") {
+        return { ok: true, output };
+      }
 
-    if (!/unknown requestId|Missing requestId|replaced|pairing required/i.test(approved.output || "")) {
+      if (!approved) {
+        await sleep(300);
+        continue;
+      }
+
       return { ok: false, output };
+    } catch (err) {
+      output += `[pairing:approve-local attempt=${attempt}] error=${err.message}\n`;
     }
 
     await sleep(300);
@@ -1387,16 +1490,20 @@ app.post("/setup/api/devices/approve", requireSetupAuth, async (req, res) => {
     }
   }
 
-  const result = await runCmd(
-    OPENCLAW_NODE,
-    clawArgs(
-      gatewayRpcArgs(["devices", "approve", resolvedRequestId], { json: true }),
-    ),
-    { secrets: [OPENCLAW_GATEWAY_TOKEN] },
-  );
+  let result;
+  try {
+    result = await approveDevicePairingRequestLocally(resolvedRequestId);
+  } catch (err) {
+    return res
+      .status(500)
+      .json({ ok: false, output: `Local pairing approval failed: ${err.message}` });
+  }
   return res
-    .status(result.code === 0 ? 200 : 500)
-    .json({ ok: result.code === 0, output: result.output });
+    .status(result?.status === "approved" ? 200 : 500)
+    .json({
+      ok: result?.status === "approved",
+      output: JSON.stringify(result, null, 2),
+    });
 });
 
 app.post("/setup/api/devices/reject", requireSetupAuth, async (req, res) => {
