@@ -208,11 +208,23 @@ function discordApplicationIdFromEnv() {
 }
 
 function buildDiscordChannelConfig(token, opts = {}) {
+  const channelId = envValue("DISCORD_PERSONAL_CHANNEL_ID");
+  const ownerUserId = envValue("DISCORD_OWNER_USER_ID");
+  const requireMention = boolFromEnv("DISCORD_REQUIRE_MENTION", false);
   const cfg = {
     enabled: true,
     token,
     groupPolicy: "allowlist",
     dmPolicy: "pairing",
+    // OpenClaw group access checks these top-level allowlists for guild/channel
+    // messages. Keep guild/channel restrictions below too, but include explicit
+    // sender/channel allowlists so doctor does not treat all group messages as
+    // silently dropped.
+    groupAllowFrom: [
+      ...(ownerUserId ? [ownerUserId, `discord:${ownerUserId}`] : []),
+      ...(channelId ? [`channel:${channelId}`, channelId] : []),
+    ],
+    allowFrom: ownerUserId ? [ownerUserId, `discord:${ownerUserId}`] : [],
   };
 
   const applicationId =
@@ -223,6 +235,15 @@ function buildDiscordChannelConfig(token, opts = {}) {
 
   const guilds = buildDiscordGuildConfigFromEnv();
   if (guilds) cfg.guilds = guilds;
+
+  if (channelId) {
+    for (const guildConfig of Object.values(cfg.guilds || {})) {
+      guildConfig.channels = {
+        ...(guildConfig.channels || {}),
+        [channelId]: { allow: true, requireMention },
+      };
+    }
+  }
 
   return cfg;
 }
