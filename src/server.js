@@ -235,7 +235,7 @@ function buildDiscordChannelConfig(token, opts = {}) {
     for (const guildConfig of Object.values(cfg.guilds || {})) {
       guildConfig.channels = {
         ...(guildConfig.channels || {}),
-        [channelId]: { allow: true, requireMention },
+        [channelId]: { requireMention },
       };
     }
   }
