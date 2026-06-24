@@ -47,7 +47,7 @@ Señales Calendar:
 Implementación MVP actual:
 
 - OAuth Google restringido a `matiasjriosb@gmail.com`.
-- Scopes mínimos: Gmail read-only + Calendar read-only.
+- Scopes mínimos: Gmail read-only + Calendar read-only o Calendar events write.
 - El collector acepta un único `GOOGLE_OAUTH_*` con ambos scopes o credenciales
   separadas por servicio (`GMAIL_OAUTH_*` y `GOOGLE_CALENDAR_OAUTH_*`).
 - `src/personal/gmail.js` lee metadata/snippets recientes, no cuerpos completos.

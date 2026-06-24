@@ -29,7 +29,7 @@ Base para el secretario personal de Matías: OpenClaw desplegado en Railway, Gem
 4. Abrir `/setup`, correr onboarding y luego `/openclaw`.
 5. Configurar Discord pairing.
 6. Ejecutar `scripts/install-personal-crons.sh` cuando el gateway esté listo.
-7. Agregar credenciales read-only para Gmail/Calendar/GitHub en Railway.
+7. Agregar credenciales para Gmail/Calendar/GitHub (Calendar puede incluir write de eventos) en Railway.
 
 ## Fuentes reales
 

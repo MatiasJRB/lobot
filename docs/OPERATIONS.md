@@ -74,7 +74,7 @@ Credenciales necesarias en Railway:
 - Google opción A: `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`,
   `GOOGLE_OAUTH_REFRESH_TOKEN` con scopes read-only de Gmail y Calendar.
   - `https://www.googleapis.com/auth/gmail.readonly`
-  - `https://www.googleapis.com/auth/calendar.readonly`
+  - `https://www.googleapis.com/auth/calendar.readonly` para solo lectura, o `https://www.googleapis.com/auth/calendar.events` para crear/editar/borrar eventos.
 - Google opción B: si ya existen tokens separados, usar:
   - Gmail: `GMAIL_OAUTH_CLIENT_ID`, `GMAIL_OAUTH_CLIENT_SECRET`,
     `GMAIL_OAUTH_REFRESH_TOKEN`.
@@ -82,8 +82,23 @@ Credenciales necesarias en Railway:
     `GOOGLE_CALENDAR_OAUTH_CLIENT_SECRET`,
     `GOOGLE_CALENDAR_OAUTH_REFRESH_TOKEN`.
 
-El collector no muta Gmail/Calendar/GitHub: no archiva, no borra, no responde,
-no acepta/cancela eventos y no modifica issues/PRs.
+El digest collector no muta Gmail/Calendar/GitHub: no archiva, no borra, no responde y no modifica issues/PRs.
+
+Calendar write opcional:
+
+```bash
+# Listar eventos para identificar event-id
+node src/cli/calendar-event.js list --calendar-id primary --query "dentista"
+
+# Crear evento (requiere confirmación humana previa + CALENDAR_WRITE_ENABLED=true)
+node src/cli/calendar-event.js create --confirm --summary "Dentista" --start "2026-06-25T15:00:00-03:00" --end "2026-06-25T16:00:00-03:00"
+
+# Editar o borrar
+node src/cli/calendar-event.js update --confirm --event-id EVENT_ID --summary "Nuevo título"
+node src/cli/calendar-event.js delete --confirm --event-id EVENT_ID
+```
+
+Nunca usar `create`, `update` o `delete` sin confirmación explícita de Matías.
 
 ## Mantenimiento
 

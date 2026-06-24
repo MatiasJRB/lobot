@@ -38,7 +38,7 @@ flowchart TD
 - Gmail, Calendar y Drive de `matiasjriosb@gmail.com`.
 - GitHub del usuario `MatiasJRB`.
 - Repos locales de contexto: `ops` y `gastos-automaticos`.
-- Collectors API read-only para Gmail, Calendar y GitHub con credenciales explícitas.
+- Collectors API read-only para Gmail/GitHub y Calendar con write opcional para eventos confirmados con credenciales explícitas.
 
 ## Lo que esta base ya deja listo
 
@@ -66,5 +66,5 @@ flowchart TD
 4. Instalar cron digests con `scripts/install-personal-crons.sh`.
 5. Agregar credenciales personales:
    - GitHub: `GITHUB_TOKEN` read-only para notificaciones/issues/PRs/Actions.
-   - Gmail/Calendar: OAuth read-only con cuenta `matiasjriosb@gmail.com`.
+   - Gmail/Calendar: OAuth con cuenta `matiasjriosb@gmail.com` (Calendar puede usar `calendar.events` para eventos confirmados).
    - Ops/gastos: jobs que lean inventarios/ICS/mails relevantes.

@@ -134,3 +134,29 @@ export async function googleApiGet(url, params = {}, opts = {}) {
     timeoutMs: 25_000,
   });
 }
+export async function googleApiJson(url, opts = {}) {
+  const accessToken = await getGoogleAccessToken(opts.service || "default");
+  const target = new URL(url);
+  for (const [key, value] of Object.entries(opts.params || {})) {
+    if (value === undefined || value === null || value === "") continue;
+    if (Array.isArray(value)) {
+      for (const item of value) target.searchParams.append(key, String(item));
+    } else {
+      target.searchParams.set(key, String(value));
+    }
+  }
+
+  const headers = {
+    Authorization: `Bearer ${accessToken}`,
+    ...(opts.body === undefined ? {} : { "Content-Type": "application/json" }),
+    ...(opts.headers || {}),
+  };
+
+  return fetchJson(target.toString(), {
+    method: opts.method || "GET",
+    headers,
+    body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
+    timeoutMs: opts.timeoutMs || 25_000,
+    expectedStatuses: opts.expectedStatuses || [200],
+  });
+}
