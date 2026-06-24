@@ -496,8 +496,11 @@ app.get("/setup", requireSetupAuth, (_req, res) => {
   res.sendFile(path.join(process.cwd(), "src", "public", "setup.html"));
 });
 
-app.get("/setup/api/status", requireSetupAuth, async (_req, res) => {
+app.get("/setup/api/status", requireSetupAuth, async (req, res) => {
   const { version, channelsHelp } = await getOpenclawInfo();
+  const includeGatewayToken =
+    req.query.includeGatewayToken === "true" ||
+    req.query.includeGatewayToken === "1";
 
   const authGroups = [
     {
@@ -610,7 +613,8 @@ app.get("/setup/api/status", requireSetupAuth, async (_req, res) => {
       discordChannelFromEnv: Boolean(envValue("DISCORD_PERSONAL_CHANNEL_ID")),
     },
     tuiEnabled: ENABLE_WEB_TUI,
-    gatewayToken: OPENCLAW_GATEWAY_TOKEN,
+    gatewayTokenAvailable: Boolean(OPENCLAW_GATEWAY_TOKEN),
+    ...(includeGatewayToken ? { gatewayToken: OPENCLAW_GATEWAY_TOKEN } : {}),
   });
 });
 

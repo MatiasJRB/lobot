@@ -212,7 +212,7 @@
             this.configured = j.configured;
             this.openclawVersion = j.openclawVersion || '';
             this.tuiEnabled = j.tuiEnabled || false;
-            this.gatewayToken = j.gatewayToken || '';
+            this.gatewayToken = j.gatewayToken || this.gatewayToken || '';
             this.status = j.configured ? 'Configured - open /openclaw' : 'Not configured - run setup below';
             this.authGroups = j.authGroups || [];
             this.envDefaults = j.defaults || {};
@@ -495,11 +495,20 @@
 
         async copyGatewayToken() {
           try {
+            if (!this.gatewayToken) {
+              const j = await this.httpJson('/setup/api/status?includeGatewayToken=true');
+              this.gatewayToken = j.gatewayToken || '';
+            }
+            if (!this.gatewayToken) throw new Error('Gateway token is not available');
             await navigator.clipboard.writeText(this.gatewayToken);
             this.tokenCopied = true;
             setTimeout(() => { this.tokenCopied = false; }, 2500);
           } catch (e) {
             // Fallback for non-HTTPS contexts
+            if (!this.gatewayToken) {
+              this.log += '✗ Could not load gateway token: ' + String(e) + '\n';
+              return;
+            }
             const ta = document.createElement('textarea');
             ta.value = this.gatewayToken;
             ta.style.position = 'fixed';
