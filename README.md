@@ -1,4 +1,4 @@
-# Clawbot Personal — OpenClaw en Railway
+# Secretario Personal — OpenClaw en Railway
 
 Base para el secretario personal de Matías: OpenClaw desplegado en Railway, Gemini como modelo inicial y Discord como canal de avisos.
 

@@ -17,10 +17,10 @@ set -euo pipefail
 #   DISCORD_OWNER_USER_ID=...
 
 REPO_OWNER="${REPO_OWNER:-MatiasJRB}"
-REPO_NAME="${REPO_NAME:-clawbot-personal-openclaw}"
+REPO_NAME="${REPO_NAME:-secretario-personal}"
 REPO_FULL="${REPO_OWNER}/${REPO_NAME}"
-PROJECT_NAME="${RAILWAY_PROJECT_NAME:-clawbot-personal-openclaw}"
-SERVICE_NAME="${RAILWAY_SERVICE_NAME:-clawbot-personal-openclaw}"
+PROJECT_NAME="${RAILWAY_PROJECT_NAME:-secretario-personal}"
+SERVICE_NAME="${RAILWAY_SERVICE_NAME:-secretario-personal}"
 SECRET_FILE="${GEMINI_SECRET_FILE:-/Users/matiasrios/Documents/GitHub/personal-assistant-secrets/gemini-api-key-details.txt}"
 BUNDLED_NODE="${BUNDLED_NODE:-/Users/matiasrios/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node}"
 RAILWAY_JS="${RAILWAY_JS:-/Users/matiasrios/.nvm/versions/node/v20.19.4/lib/node_modules/@railway/cli/bin/railway.js}"
@@ -137,7 +137,7 @@ cat /tmp/railway-volume.json 2>/dev/null | redact || true
 
 printf '[8/8] Deploying and generating public domain...\n'
 railway_cmd up --detach
-railway_cmd domain --port 8080 --service "$SERVICE_NAME" --json | tee /tmp/clawbot-personal-railway-domain.json | redact || true
+railway_cmd domain --port 8080 --service "$SERVICE_NAME" --json | tee /tmp/secretario-personal-railway-domain.json | redact || true
 
 cat <<SUMMARY
 
