@@ -30,6 +30,14 @@ mkdir -p "$STATE_DIR" "$STATE_DIR/npm" "$STATE_DIR/npm/projects" "$WORKSPACE_DIR
 if [ -d /app/seed-workspace ]; then
   echo "[entrypoint] seeding workspace defaults into ${WORKSPACE_DIR} (non-destructive)"
   cp -an /app/seed-workspace/. "$WORKSPACE_DIR"/
+  if [ "${OPENCLAW_SYNC_SEED_INSTRUCTIONS:-true}" = "true" ]; then
+    echo "[entrypoint] syncing canonical workspace instruction files into ${WORKSPACE_DIR}"
+    for instruction_file in AGENTS.md TOOLS.md; do
+      if [ -f "/app/seed-workspace/${instruction_file}" ]; then
+        cp -a "/app/seed-workspace/${instruction_file}" "${WORKSPACE_DIR}/${instruction_file}"
+      fi
+    done
+  fi
 fi
 # Railway volumes may preserve dirs from failed prior boots; repair them every boot.
 chown -R openclaw:openclaw /data "$STATE_DIR" "$WORKSPACE_DIR" /home/openclaw || true
