@@ -216,14 +216,9 @@ function buildDiscordChannelConfig(token, opts = {}) {
     token,
     groupPolicy: "allowlist",
     dmPolicy: "pairing",
-    // OpenClaw group access checks these top-level allowlists for guild/channel
-    // messages. Keep guild/channel restrictions below too, but include explicit
-    // sender/channel allowlists so doctor does not treat all group messages as
-    // silently dropped.
-    groupAllowFrom: [
-      ...(ownerUserId ? [ownerUserId, `discord:${ownerUserId}`] : []),
-      ...(channelId ? [`channel:${channelId}`, channelId] : []),
-    ],
+    // DM/native-command sender allowlist. Guild/channel access is restricted by
+    // the guilds/channels block below; Discord plugin schema does not accept the
+    // cross-channel groupAllowFrom key here.
     allowFrom: ownerUserId ? [ownerUserId, `discord:${ownerUserId}`] : [],
   };
 
