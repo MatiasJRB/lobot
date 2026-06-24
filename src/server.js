@@ -214,11 +214,10 @@ function buildDiscordChannelConfig(token, opts = {}) {
   const cfg = {
     enabled: true,
     token,
-    groupPolicy: "allowlist",
-    dmPolicy: "pairing",
-    // DM/native-command sender allowlist. Guild/channel access is restricted by
-    // the guilds/channels block below; Discord plugin schema does not accept the
-    // cross-channel groupAllowFrom key here.
+    // Private personal server: keep inbound simple and avoid plugin/schema
+    // mismatches that silently drop guild-channel messages under allowlist.
+    groupPolicy: "open",
+    dmPolicy: ownerUserId ? "allowlist" : "pairing",
     allowFrom: ownerUserId ? [ownerUserId, `discord:${ownerUserId}`] : [],
   };
 
