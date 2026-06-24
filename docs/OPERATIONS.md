@@ -9,11 +9,19 @@
 5. Run Setup.
 6. Abrir `/openclaw` y pegar/aprobar `OPENCLAW_GATEWAY_TOKEN` si lo pide.
 7. En Discord, mandar mensaje al bot/canal y completar pairing si corresponde.
-8. Ejecutar `scripts/install-personal-crons.sh` en el entorno OpenClaw para crear digests.
+8. Ejecutar `POST /setup/api/configure-discord` para activar `channels.discord` sin resetear OpenClaw.
+9. Ejecutar `POST /setup/api/discord/test` para confirmar que el canal recibe mensajes.
+10. Ejecutar `POST /setup/api/crons/install-personal` para crear digests.
 
 ## Cron digests
 
-Script:
+Endpoint recomendado:
+
+```text
+POST /setup/api/crons/install-personal
+```
+
+Script equivalente para shell dentro del entorno OpenClaw:
 
 ```bash
 scripts/install-personal-crons.sh
@@ -35,6 +43,7 @@ DISCORD_PERSONAL_CHANNEL_TARGET=channel:123456789012345678
 
 - Después de upgrades: `openclaw doctor --fix`.
 - Revisar `/setup/api/debug` si algo falla.
+- Revisar `/setup/api/crons` para ver digests instalados.
 - Revisar logs Railway si el gateway no levanta.
 - Exportar backup desde `/setup` antes de cambios grandes.
 

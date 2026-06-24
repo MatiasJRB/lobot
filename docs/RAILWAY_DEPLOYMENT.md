@@ -23,6 +23,7 @@ OPENCLAW_WORKSPACE_DIR=/data/workspace
 OPENCLAW_VERSION=latest
 GEMINI_API_KEY=<set from local secret file>
 DISCORD_BOT_TOKEN=<fresh Discord bot token>
+DISCORD_APPLICATION_ID=<discord application/client id>
 GEMINI_MODEL=google/gemini-3.1-flash-lite
 OPENCLAW_DEFAULT_MODEL=google/gemini-3.1-flash-lite
 ```
@@ -53,4 +54,15 @@ DISCORD_REQUIRE_MENTION=false
 
 ## Estado local conocido
 
-El Railway CLI local falla por una dependencia Homebrew/Node (`libsimdjson.26.dylib`). Si no se repara localmente, usar Railway Dashboard + GitHub deploy o reinstalar Node/Railway CLI fuera de este repo.
+El `node` de Homebrew puede fallar por una dependencia `libsimdjson.26.dylib`.
+Para automatizar Railway desde Codex/local, usar el Node bundled:
+
+```text
+/Users/matiasrios/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node
+```
+
+con el CLI instalado en:
+
+```text
+/Users/matiasrios/.nvm/versions/node/v20.19.4/lib/node_modules/@railway/cli/bin/railway.js
+```

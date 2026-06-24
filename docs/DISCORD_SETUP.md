@@ -8,7 +8,8 @@ Docs base: https://docs.openclaw.ai/channels/discord
 2. New Application: `Clawbot Personal`.
 3. Bot → Add Bot.
 4. Reset Token → guardar como `DISCORD_BOT_TOKEN` en Railway.
-5. Privileged Gateway Intents:
+5. Copiar Application ID → guardar como `DISCORD_APPLICATION_ID` en Railway.
+6. Privileged Gateway Intents:
    - Message Content Intent: requerido.
    - Server Members Intent: recomendado si se usan allowlists por servidor/canal.
    - Presence Intent: no necesario para MVP.
@@ -45,6 +46,28 @@ Copiar IDs con Developer Mode:
 - Server ID → `DISCORD_GUILD_ID`
 - Channel ID → `DISCORD_PERSONAL_CHANNEL_ID`
 - User ID de Matías → `DISCORD_OWNER_USER_ID`
+
+## Activar en OpenClaw sin resetear setup
+
+Cuando el setup base ya está configurado, no uses `/setup/api/run` para Discord
+porque ese endpoint no rerunea onboarding. Usá los endpoints idempotentes del
+wrapper:
+
+```bash
+# Configura channels.discord desde variables Railway/env y reinicia gateway.
+POST /setup/api/configure-discord
+
+# Envía un mensaje de prueba al target Discord configurado.
+POST /setup/api/discord/test
+
+# Instala los 3 digests diarios si todavía no existen.
+POST /setup/api/crons/install-personal
+
+# Lista crons.
+GET /setup/api/crons
+```
+
+Todos requieren Basic Auth con `SETUP_PASSWORD`.
 
 ## Seguridad
 

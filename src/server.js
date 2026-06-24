@@ -179,13 +179,27 @@ function buildDiscordGuildConfigFromEnv() {
   return { [guildId]: guildConfig };
 }
 
-function buildDiscordChannelConfig(token) {
+function discordApplicationIdFromEnv() {
+  return (
+    envValue("DISCORD_APPLICATION_ID") ||
+    envValue("DISCORD_CLIENT_ID") ||
+    envValue("DISCORD_APPLICATION_CLIENT_ID")
+  );
+}
+
+function buildDiscordChannelConfig(token, opts = {}) {
   const cfg = {
     enabled: true,
     token,
     groupPolicy: "allowlist",
     dmPolicy: "pairing",
   };
+
+  const applicationId =
+    opts.applicationId?.trim?.() || discordApplicationIdFromEnv();
+  if (applicationId) {
+    cfg.applicationId = applicationId;
+  }
 
   const guilds = buildDiscordGuildConfigFromEnv();
   if (guilds) cfg.guilds = guilds;
@@ -691,6 +705,122 @@ function runCmd(cmd, args, opts = {}) {
   });
 }
 
+async function setChannelConfig(name, cfgObj, opts = {}) {
+  const secrets = opts.secrets || [];
+  const set = await runCmd(
+    OPENCLAW_NODE,
+    clawArgs([
+      "config",
+      "set",
+      "--json",
+      `channels.${name}`,
+      JSON.stringify(cfgObj),
+    ]),
+    { secrets },
+  );
+  const get = await runCmd(
+    OPENCLAW_NODE,
+    clawArgs(["config", "get", `channels.${name}`]),
+    { secrets },
+  );
+  const setOutput = set.output || "(no output)";
+  return {
+    ok: set.code === 0 && get.code === 0,
+    output:
+      `\n[${name} config] exit=${set.code} (output ${set.output.length} chars)\n${setOutput}` +
+      `\n[${name} verify] exit=${get.code} (output redacted, ${get.output.length} chars)`,
+  };
+}
+
+function discordDeliveryTargetFromEnv() {
+  return (
+    envValue("DISCORD_PERSONAL_CHANNEL_TARGET") ||
+    (envValue("DISCORD_PERSONAL_CHANNEL_ID")
+      ? `channel:${envValue("DISCORD_PERSONAL_CHANNEL_ID")}`
+      : "") ||
+    (envValue("DISCORD_OWNER_USER_ID")
+      ? `user:${envValue("DISCORD_OWNER_USER_ID")}`
+      : "")
+  );
+}
+
+const PERSONAL_DIGEST_CRON_JOBS = [
+  {
+    schedule: "0 9 * * *",
+    name: "Personal digest — mañana",
+    prompt:
+      "Usá seed-workspace/prompts/digest.md. Prepará el digest personal de la mañana para Matías: agenda de hoy, mails/GitHub importantes, vencimientos, seguridad y próximos pasos. No mezcles Mango salvo impacto personal claro.",
+  },
+  {
+    schedule: "0 15 * * *",
+    name: "Personal digest — tarde",
+    prompt:
+      "Usá seed-workspace/prompts/digest.md. Revisá novedades personales desde la mañana y marcá solo lo que cambia prioridades de Matías para la tarde/noche.",
+  },
+  {
+    schedule: "0 21 * * *",
+    name: "Personal digest — noche",
+    prompt:
+      "Usá seed-workspace/prompts/digest.md. Cerrá el día personal de Matías: pendientes que quedan, agenda de mañana, alertas de dinero/seguridad/servicios y automatizaciones candidatas.",
+  },
+];
+
+async function installPersonalDigestCrons(opts = {}) {
+  const target = (opts.target || discordDeliveryTargetFromEnv()).trim();
+  if (!target) {
+    return {
+      ok: false,
+      output:
+        "Missing Discord delivery target. Set DISCORD_PERSONAL_CHANNEL_TARGET or DISCORD_PERSONAL_CHANNEL_ID.",
+    };
+  }
+
+  const channel = (opts.channel || envValue("OPENCLAW_CRON_CHANNEL") || "discord").trim();
+  const tz = (opts.tz || envValue("OPENCLAW_CRON_TZ") || "America/Argentina/Buenos_Aires").trim();
+  const model = (opts.model || envValue("OPENCLAW_CRON_MODEL") || "").trim();
+  const thinking = (opts.thinking || envValue("OPENCLAW_CRON_THINKING") || "").trim();
+
+  await ensureGatewayRunning();
+
+  const list = await runCmd(OPENCLAW_NODE, clawArgs(["cron", "list"]));
+  let output = `[cron list] exit=${list.code}\n${list.output || ""}\n`;
+  let ok = list.code === 0;
+
+  for (const job of PERSONAL_DIGEST_CRON_JOBS) {
+    if (list.output.includes(job.name)) {
+      output += `\n[skip] cron already exists: ${job.name}`;
+      continue;
+    }
+
+    const args = [
+      "cron",
+      "create",
+      job.schedule,
+      job.prompt,
+      "--name",
+      job.name,
+      "--tz",
+      tz,
+      "--session",
+      "isolated",
+      "--announce",
+      "--channel",
+      channel,
+      "--to",
+      target,
+    ];
+
+    if (model) args.push("--model", model);
+    if (thinking) args.push("--thinking", thinking);
+
+    const created = await runCmd(OPENCLAW_NODE, clawArgs(args));
+    output += `\n[create] ${job.name} -> ${job.schedule} (${tz}) exit=${created.code}\n${created.output || ""}`;
+    ok = ok && created.code === 0;
+  }
+
+  return { ok, output };
+}
+
 const VALID_AUTH_CHOICES = [
   "openai-api-key",
   "apiKey",
@@ -941,6 +1071,120 @@ app.post("/setup/api/doctor", requireSetupAuth, async (_req, res) => {
     ok: result.code === 0,
     output: result.output,
   });
+});
+
+app.post("/setup/api/configure-discord", requireSetupAuth, async (req, res) => {
+  try {
+    const payload = req.body || {};
+    const validationError = validatePayload(payload);
+    if (validationError) {
+      return res.status(400).json({ ok: false, output: validationError });
+    }
+
+    const discordPayloadToken = payload.discordToken?.trim() || "";
+    const discordEnvToken = envValue("DISCORD_BOT_TOKEN");
+    if (!discordPayloadToken && !discordEnvToken) {
+      return res.status(400).json({
+        ok: false,
+        output: "Missing Discord token. Set DISCORD_BOT_TOKEN or pass discordToken.",
+      });
+    }
+
+    const discordToken =
+      discordPayloadToken || envSecretRef("DISCORD_BOT_TOKEN");
+    const result = await setChannelConfig(
+      "discord",
+      buildDiscordChannelConfig(discordToken, {
+        applicationId: payload.discordApplicationId || "",
+      }),
+      { secrets: [discordPayloadToken, discordEnvToken].filter(Boolean) },
+    );
+
+    let output = result.output;
+    if (result.ok) {
+      output += "\n[setup] Restarting gateway so Discord config is active...\n";
+      await restartGateway();
+      output += "[setup] Gateway restarted.\n";
+    }
+
+    return res.status(result.ok ? 200 : 500).json({
+      ok: result.ok,
+      output,
+    });
+  } catch (err) {
+    console.error("[/setup/api/configure-discord] error:", err);
+    return res
+      .status(500)
+      .json({ ok: false, output: `Internal error: ${String(err)}` });
+  }
+});
+
+app.get("/setup/api/crons", requireSetupAuth, async (_req, res) => {
+  const result = await runCmd(OPENCLAW_NODE, clawArgs(["cron", "list"]));
+  return res.status(result.code === 0 ? 200 : 500).json({
+    ok: result.code === 0,
+    output: result.output,
+  });
+});
+
+app.post("/setup/api/crons/install-personal", requireSetupAuth, async (req, res) => {
+  try {
+    const payload = req.body || {};
+    const result = await installPersonalDigestCrons({
+      target: payload.target,
+      channel: payload.channel,
+      tz: payload.tz,
+      model: payload.model,
+      thinking: payload.thinking,
+    });
+    return res.status(result.ok ? 200 : 500).json(result);
+  } catch (err) {
+    console.error("[/setup/api/crons/install-personal] error:", err);
+    return res
+      .status(500)
+      .json({ ok: false, output: `Internal error: ${String(err)}` });
+  }
+});
+
+app.post("/setup/api/discord/test", requireSetupAuth, async (req, res) => {
+  try {
+    const payload = req.body || {};
+    const target = (payload.target || discordDeliveryTargetFromEnv()).trim();
+    if (!target) {
+      return res.status(400).json({
+        ok: false,
+        output:
+          "Missing Discord delivery target. Set DISCORD_PERSONAL_CHANNEL_TARGET or DISCORD_PERSONAL_CHANNEL_ID.",
+      });
+    }
+
+    await ensureGatewayRunning();
+    const message =
+      (payload.message || "").trim() ||
+      "✅ Clawbot Personal quedó conectado a Discord. Si ves esto, el canal de avisos funciona.";
+    const result = await runCmd(
+      OPENCLAW_NODE,
+      clawArgs([
+        "message",
+        "send",
+        "--channel",
+        "discord",
+        "--target",
+        target,
+        "--message",
+        message,
+      ]),
+    );
+    return res.status(result.code === 0 ? 200 : 500).json({
+      ok: result.code === 0,
+      output: result.output,
+    });
+  } catch (err) {
+    console.error("[/setup/api/discord/test] error:", err);
+    return res
+      .status(500)
+      .json({ ok: false, output: `Internal error: ${String(err)}` });
+  }
 });
 
 app.get("/setup/api/devices", requireSetupAuth, async (_req, res) => {
