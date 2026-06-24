@@ -92,6 +92,18 @@ function clawArgs(args) {
   return [OPENCLAW_ENTRY, ...args];
 }
 
+function gatewayRpcArgs(args, opts = {}) {
+  const out = [
+    ...args,
+    "--url",
+    GATEWAY_WS_TARGET,
+    "--token",
+    OPENCLAW_GATEWAY_TOKEN,
+  ];
+  if (opts.json) out.push("--json");
+  return out;
+}
+
 
 function envValue(name) {
   return process.env[name]?.trim() || "";
@@ -730,6 +742,117 @@ function runCmd(cmd, args, opts = {}) {
   });
 }
 
+function parseJsonFromCommandOutput(output) {
+  const jsonMatch = String(output || "").match(/(\{[\s\S]*\}|\[[\s\S]*\])\s*$/);
+  if (!jsonMatch) return null;
+  return JSON.parse(jsonMatch[1]);
+}
+
+function pendingDeviceRequestsFromPayload(payload) {
+  if (!payload || typeof payload !== "object") return [];
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload.pending)) return payload.pending;
+  if (Array.isArray(payload.pendingRequests)) return payload.pendingRequests;
+  if (Array.isArray(payload.requests)) return payload.requests;
+  if (payload.data && typeof payload.data === "object") {
+    return pendingDeviceRequestsFromPayload(payload.data);
+  }
+  return [];
+}
+
+function latestPendingDeviceRequest(pending) {
+  return [...pending]
+    .filter((req) => req && typeof req === "object" && req.requestId)
+    .sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0))[0];
+}
+
+function isPairingRequiredOutput(output) {
+  return /\b(device\s+)?pairing required\b/i.test(String(output || ""));
+}
+
+async function listDevicePairingRequests() {
+  const result = await runCmd(
+    OPENCLAW_NODE,
+    clawArgs(gatewayRpcArgs(["devices", "list"], { json: true })),
+    { secrets: [OPENCLAW_GATEWAY_TOKEN] },
+  );
+  let data = null;
+  try {
+    data = parseJsonFromCommandOutput(result.output);
+  } catch (err) {
+    console.warn(`[devices] failed to parse JSON list output: ${err.message}`);
+  }
+  return { result, data, pending: pendingDeviceRequestsFromPayload(data) };
+}
+
+async function approveLatestPendingDeviceRequest(reason = "gateway command") {
+  let output = `[pairing] checking pending device requests for ${reason}\n`;
+
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const listed = await listDevicePairingRequests();
+    output += `[pairing:list attempt=${attempt}] exit=${listed.result.code}\n${listed.result.output || ""}\n`;
+
+    const request = latestPendingDeviceRequest(listed.pending);
+    if (!request?.requestId) {
+      output += "[pairing] no pending device request found.\n";
+      return { ok: false, output };
+    }
+
+    const requestId = String(request.requestId);
+    const approved = await runCmd(
+      OPENCLAW_NODE,
+      clawArgs(
+        gatewayRpcArgs(["devices", "approve", requestId], { json: true }),
+      ),
+      { secrets: [OPENCLAW_GATEWAY_TOKEN] },
+    );
+    output += `[pairing:approve attempt=${attempt}] requestId=${requestId} exit=${approved.code}\n${approved.output || ""}\n`;
+
+    if (approved.code === 0) {
+      return { ok: true, output };
+    }
+
+    if (!/unknown requestId|Missing requestId|replaced|pairing required/i.test(approved.output || "")) {
+      return { ok: false, output };
+    }
+
+    await sleep(300);
+  }
+
+  output += "[pairing] failed after 3 attempts.\n";
+  return { ok: false, output };
+}
+
+async function runGatewayRpcWithAutoPairing(label, args, opts = {}) {
+  const secrets = [OPENCLAW_GATEWAY_TOKEN, ...(opts.secrets || [])];
+  const first = await runCmd(
+    OPENCLAW_NODE,
+    clawArgs(gatewayRpcArgs(args, { json: opts.json })),
+    { secrets },
+  );
+
+  if (!isPairingRequiredOutput(first.output)) return first;
+
+  const pairing = await approveLatestPendingDeviceRequest(label);
+  const retry = pairing.ok
+    ? await runCmd(
+      OPENCLAW_NODE,
+      clawArgs(gatewayRpcArgs(args, { json: opts.json })),
+      { secrets },
+    )
+    : { code: first.code, output: "" };
+
+  return {
+    code: pairing.ok ? retry.code : first.code,
+    output:
+      `[${label}] first attempt exit=${first.code}\n${first.output || ""}\n` +
+      `${pairing.output || ""}` +
+      (pairing.ok
+        ? `[${label}] retry after pairing exit=${retry.code}\n${retry.output || ""}`
+        : `[${label}] retry skipped because pairing approval failed.\n`),
+  };
+}
+
 async function setChannelConfig(name, cfgObj, opts = {}) {
   const secrets = opts.secrets || [];
   const set = await runCmd(
@@ -807,17 +930,9 @@ async function installPersonalDigestCrons(opts = {}) {
 
   await ensureGatewayRunning();
 
-  const list = await runCmd(
-    OPENCLAW_NODE,
-    clawArgs([
-      "cron",
-      "list",
-      "--url",
-      GATEWAY_WS_TARGET,
-      "--token",
-      OPENCLAW_GATEWAY_TOKEN,
-    ]),
-    { secrets: [OPENCLAW_GATEWAY_TOKEN] },
+  const list = await runGatewayRpcWithAutoPairing(
+    "cron list",
+    ["cron", "list"],
   );
   let output = `[cron list] exit=${list.code}\n${list.output || ""}\n`;
   let ok = list.code === 0;
@@ -844,18 +959,15 @@ async function installPersonalDigestCrons(opts = {}) {
       channel,
       "--to",
       target,
-      "--url",
-      GATEWAY_WS_TARGET,
-      "--token",
-      OPENCLAW_GATEWAY_TOKEN,
     ];
 
     if (model) args.push("--model", model);
     if (thinking) args.push("--thinking", thinking);
 
-    const created = await runCmd(OPENCLAW_NODE, clawArgs(args), {
-      secrets: [OPENCLAW_GATEWAY_TOKEN],
-    });
+    const created = await runGatewayRpcWithAutoPairing(
+      `cron create ${job.name}`,
+      args,
+    );
     output += `\n[create] ${job.name} -> ${job.schedule} (${tz}) exit=${created.code}\n${created.output || ""}`;
     ok = ok && created.code === 0;
   }
@@ -1164,7 +1276,18 @@ app.post("/setup/api/configure-discord", requireSetupAuth, async (req, res) => {
 });
 
 app.get("/setup/api/crons", requireSetupAuth, async (_req, res) => {
-  const result = await runCmd(OPENCLAW_NODE, clawArgs(["cron", "list"]));
+  try {
+    await ensureGatewayRunning();
+  } catch (err) {
+    return res
+      .status(500)
+      .json({ ok: false, output: `Gateway unavailable: ${err.message}` });
+  }
+
+  const result = await runGatewayRpcWithAutoPairing(
+    "cron list",
+    ["cron", "list"],
+  );
   return res.status(result.code === 0 ? 200 : 500).json({
     ok: result.code === 0,
     output: result.output,
@@ -1232,16 +1355,13 @@ app.post("/setup/api/discord/test", requireSetupAuth, async (req, res) => {
 });
 
 app.get("/setup/api/devices", requireSetupAuth, async (_req, res) => {
-  const args = ["devices", "list", "--json", "--token", OPENCLAW_GATEWAY_TOKEN];
-  const result = await runCmd(OPENCLAW_NODE, clawArgs(args));
+  const { result, data } = await listDevicePairingRequests();
   console.log(`[devices] list exit=${result.code} output=${redactSecrets(result.output)}`);
   try {
-    const jsonMatch = result.output.match(/(\{[\s\S]*\}|\[[\s\S]*\])\s*$/);
-    if (!jsonMatch) {
+    if (!data) {
       console.warn("[devices] no JSON found in output");
       return res.json({ ok: result.code === 0, raw: result.output });
     }
-    const data = JSON.parse(jsonMatch[1]);
     console.log(`[devices] parsed keys=${Object.keys(data)} pending=${JSON.stringify(data.pending)} paired=${JSON.stringify(data.paired)}`);
     return res.json({ ok: true, data, raw: result.output });
   } catch (parseErr) {
@@ -1252,14 +1372,28 @@ app.get("/setup/api/devices", requireSetupAuth, async (_req, res) => {
 
 app.post("/setup/api/devices/approve", requireSetupAuth, async (req, res) => {
   const { requestId } = req.body || {};
-  const args = ["devices", "approve"];
-  if (requestId) {
-    args.push(String(requestId));
-  } else {
-    args.push("--latest");
+  let resolvedRequestId = requestId ? String(requestId) : "";
+
+  if (!resolvedRequestId) {
+    const listed = await listDevicePairingRequests();
+    const request = latestPendingDeviceRequest(listed.pending);
+    resolvedRequestId = request?.requestId ? String(request.requestId) : "";
+    if (!resolvedRequestId) {
+      return res.status(404).json({
+        ok: false,
+        output:
+          `[devices:list] exit=${listed.result.code}\n${listed.result.output || ""}\nNo pending device request found.`,
+      });
+    }
   }
-  args.push("--token", OPENCLAW_GATEWAY_TOKEN);
-  const result = await runCmd(OPENCLAW_NODE, clawArgs(args));
+
+  const result = await runCmd(
+    OPENCLAW_NODE,
+    clawArgs(
+      gatewayRpcArgs(["devices", "approve", resolvedRequestId], { json: true }),
+    ),
+    { secrets: [OPENCLAW_GATEWAY_TOKEN] },
+  );
   return res
     .status(result.code === 0 ? 200 : 500)
     .json({ ok: result.code === 0, output: result.output });
@@ -1272,9 +1406,12 @@ app.post("/setup/api/devices/reject", requireSetupAuth, async (req, res) => {
   }
   const args = [
     "devices", "reject", String(requestId),
-    "--token", OPENCLAW_GATEWAY_TOKEN,
   ];
-  const result = await runCmd(OPENCLAW_NODE, clawArgs(args));
+  const result = await runCmd(
+    OPENCLAW_NODE,
+    clawArgs(gatewayRpcArgs(args, { json: true })),
+    { secrets: [OPENCLAW_GATEWAY_TOKEN] },
+  );
   return res
     .status(result.code === 0 ? 200 : 500)
     .json({ ok: result.code === 0, output: result.output });
