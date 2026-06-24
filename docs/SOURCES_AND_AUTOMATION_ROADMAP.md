@@ -18,11 +18,14 @@ Señales:
 - CI fallidas en repos personales.
 - Security/dependabot alerts si hay acceso.
 
-Implementación candidata:
+Implementación MVP actual:
 
 - `GITHUB_TOKEN` como variable Railway.
-- Script o MCP que consulte API de GitHub y entregue JSON al agente.
-- Clasificación P0/P1/P2/P3 por OpenClaw.
+- `src/personal/github.js` consulta API REST de GitHub:
+  - notificaciones privadas si hay token;
+  - `review-requested`, `assignee`, `mentions` por Search API;
+  - workflow runs fallidos recientes en repos de `GITHUB_OWNER_ALLOWLIST`.
+- `src/cron/run-personal-digest.js` junta señales y las entrega al cron.
 
 ## Fase 2 — Gmail y Calendar
 
@@ -41,11 +44,21 @@ Señales Calendar:
 - Conflictos.
 - Recordatorios domésticos/personales.
 
-Implementación candidata:
+Implementación MVP actual:
 
 - OAuth Google restringido a `matiasjriosb@gmail.com`.
-- Scopes mínimos: Gmail read-only + Calendar read-only al inicio.
+- Scopes mínimos: Gmail read-only + Calendar read-only.
+- El collector acepta un único `GOOGLE_OAUTH_*` con ambos scopes o credenciales
+  separadas por servicio (`GMAIL_OAUTH_*` y `GOOGLE_CALENDAR_OAUTH_*`).
+- `src/personal/gmail.js` lee metadata/snippets recientes, no cuerpos completos.
+- `src/personal/calendar.js` lee eventos próximos/cancelados y detecta conflictos.
 - No enviar/archivar/borrar mails hasta una fase posterior con confirmación explícita.
+
+Pendiente:
+
+- Alta/rotación guiada de OAuth refresh token.
+- Alertas reactivas P0/P1 además del digest programado.
+- Mejor deduplicación entre corridas y memoria de “ya avisado”.
 
 ## Fase 3 — Ops y finanzas personales
 

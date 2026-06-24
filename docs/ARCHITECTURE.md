@@ -24,7 +24,12 @@ flowchart TD
   Gateway --> Discord["Discord bot/channel"]
   Gateway --> Gemini["Gemini API"]
   Gateway --> Cron["OpenClaw cron"]
-  Cron --> Discord
+  Cron --> CommandDigest["node src/cron/run-personal-digest.js"]
+  CommandDigest --> Gmail["Gmail API"]
+  CommandDigest --> Calendar["Google Calendar API"]
+  CommandDigest --> GitHub["GitHub API"]
+  CommandDigest --> Gemini
+  CommandDigest --> Discord
   Workspace --> Instructions["AGENTS.md / SOUL.md / TOOLS.md"]
 ```
 
@@ -33,7 +38,7 @@ flowchart TD
 - Gmail, Calendar y Drive de `matiasjriosb@gmail.com`.
 - GitHub del usuario `MatiasJRB`.
 - Repos locales de contexto: `ops` y `gastos-automaticos`.
-- Futuro: conectores/API/MCP para Gmail, Calendar y GitHub con credenciales explícitas.
+- Collectors API read-only para Gmail, Calendar y GitHub con credenciales explícitas.
 
 ## Lo que esta base ya deja listo
 
@@ -43,7 +48,15 @@ flowchart TD
 - SecretRef para Discord cuando el token está en env.
 - Redacción de secretos en output/logs del setup wrapper.
 - Workspace inicial no destructivo: si `/data/workspace` ya tiene archivos, no los pisa.
-- Scripts para instalar cron digests.
+- Scripts para instalar/editar cron digests como command cron jobs:
+  OpenClaw ejecuta `node src/cron/run-personal-digest.js` en el Gateway,
+  captura stdout y lo entrega al canal Discord configurado.
+- Collectors:
+  - Gmail: mensajes recientes por metadata/snippet, clasificados por seguridad,
+    plata/pagos/vencimientos y posible respuesta.
+  - Calendar: agenda próxima, cancelaciones recientes y conflictos.
+  - GitHub: notificaciones, review requests, asignaciones/menciones y CI fallida
+    en repos personales.
 
 ## Siguientes integraciones
 
@@ -51,7 +64,7 @@ flowchart TD
 2. Deploy Railway con Volume `/data` y variables.
 3. Completar onboarding en `/setup`.
 4. Instalar cron digests con `scripts/install-personal-crons.sh`.
-5. Agregar conectores personales:
-   - GitHub: `GITHUB_TOKEN` para notificaciones/issues/PRs/security alerts.
-   - Gmail/Calendar: OAuth/API o MCP con cuenta `matiasjriosb@gmail.com`.
+5. Agregar credenciales personales:
+   - GitHub: `GITHUB_TOKEN` read-only para notificaciones/issues/PRs/Actions.
+   - Gmail/Calendar: OAuth read-only con cuenta `matiasjriosb@gmail.com`.
    - Ops/gastos: jobs que lean inventarios/ICS/mails relevantes.

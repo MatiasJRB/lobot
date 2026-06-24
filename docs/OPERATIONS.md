@@ -27,11 +27,16 @@ Script equivalente para shell dentro del entorno OpenClaw:
 scripts/install-personal-crons.sh
 ```
 
-Crea:
+Edita si ya existen o crea si faltan:
 
 - 09:00 ART — digest mañana.
 - 15:00 ART — digest tarde.
 - 21:00 ART — digest noche.
+
+Los jobs son **OpenClaw command cron jobs**: el Gateway ejecuta
+`node src/cron/run-personal-digest.js --slot <morning|afternoon|night>`, captura
+stdout y lo entrega por Discord. Esto evita depender de un prompt que tenga que
+decidir usar shell; el collector corre siempre.
 
 Usa `DISCORD_PERSONAL_CHANNEL_TARGET`, por ejemplo:
 
@@ -39,11 +44,53 @@ Usa `DISCORD_PERSONAL_CHANNEL_TARGET`, por ejemplo:
 DISCORD_PERSONAL_CHANNEL_TARGET=channel:123456789012345678
 ```
 
+## Fuentes reales
+
+Estado de credenciales:
+
+```text
+GET /setup/api/personal/sources/status
+```
+
+Probar digest sin enviar a Discord:
+
+```text
+GET /setup/api/personal/digest?format=markdown
+GET /setup/api/personal/digest?format=json
+GET /setup/api/personal/digest?format=markdown&ai=1
+```
+
+CLI local/container:
+
+```bash
+node src/cron/run-personal-digest.js --slot manual --no-ai
+node src/cron/run-personal-digest.js --slot morning
+```
+
+Credenciales necesarias en Railway:
+
+- GitHub: `GITHUB_TOKEN`, `GITHUB_USERNAME=MatiasJRB`,
+  `GITHUB_OWNER_ALLOWLIST=MatiasJRB`.
+- Google opción A: `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`,
+  `GOOGLE_OAUTH_REFRESH_TOKEN` con scopes read-only de Gmail y Calendar.
+  - `https://www.googleapis.com/auth/gmail.readonly`
+  - `https://www.googleapis.com/auth/calendar.readonly`
+- Google opción B: si ya existen tokens separados, usar:
+  - Gmail: `GMAIL_OAUTH_CLIENT_ID`, `GMAIL_OAUTH_CLIENT_SECRET`,
+    `GMAIL_OAUTH_REFRESH_TOKEN`.
+  - Calendar: `GOOGLE_CALENDAR_OAUTH_CLIENT_ID`,
+    `GOOGLE_CALENDAR_OAUTH_CLIENT_SECRET`,
+    `GOOGLE_CALENDAR_OAUTH_REFRESH_TOKEN`.
+
+El collector no muta Gmail/Calendar/GitHub: no archiva, no borra, no responde,
+no acepta/cancela eventos y no modifica issues/PRs.
+
 ## Mantenimiento
 
 - Después de upgrades: `openclaw doctor --fix`.
 - Revisar `/setup/api/debug` si algo falla.
 - Revisar `/setup/api/crons` para ver digests instalados.
+- Revisar `/setup/api/personal/sources/status` si un digest reporta cobertura faltante.
 - Revisar logs Railway si el gateway no levanta.
 - Exportar backup desde `/setup` antes de cambios grandes.
 

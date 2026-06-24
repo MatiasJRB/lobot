@@ -1,45 +1,90 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Install the initial three daily Discord digests for Clawbot Personal.
-# Run this inside the Railway shell/container or OpenClaw environment after setup.
+# Install/update the three daily personal Discord digests for Secretario Personal.
+# These are OpenClaw command cron jobs: the Gateway executes the local collector
+# and sends stdout to Discord via cron delivery.
 
 : "${DISCORD_PERSONAL_CHANNEL_TARGET:?Set DISCORD_PERSONAL_CHANNEL_TARGET, e.g. channel:123456789012345678}"
 
 TZ_NAME="${OPENCLAW_CRON_TZ:-America/Argentina/Buenos_Aires}"
 CHANNEL="${OPENCLAW_CRON_CHANNEL:-discord}"
 TARGET="${DISCORD_PERSONAL_CHANNEL_TARGET}"
+APP_DIR="${PERSONAL_ASSISTANT_APP_DIR:-/app}"
+TIMEOUT_SECONDS="${PERSONAL_DIGEST_CRON_TIMEOUT_SECONDS:-240}"
+NO_OUTPUT_TIMEOUT_SECONDS="${PERSONAL_DIGEST_CRON_NO_OUTPUT_TIMEOUT_SECONDS:-90}"
+OUTPUT_MAX_BYTES="${PERSONAL_DIGEST_CRON_OUTPUT_MAX_BYTES:-20000}"
 
-create_if_missing() {
+job_id_by_name() {
+  local name="$1"
+  openclaw cron list --json 2>/dev/null | node -e '
+const name = process.argv[1];
+let input = "";
+process.stdin.on("data", (chunk) => input += chunk);
+process.stdin.on("end", () => {
+  const match = input.match(/(\{[\s\S]*\}|\[[\s\S]*\])\s*$/);
+  if (!match) return;
+  let payload;
+  try { payload = JSON.parse(match[1]); } catch { return; }
+  function jobsFrom(value) {
+    if (!value) return [];
+    if (Array.isArray(value)) return value;
+    if (Array.isArray(value.jobs)) return value.jobs;
+    if (Array.isArray(value.items)) return value.items;
+    if (Array.isArray(value.data)) return value.data;
+    if (value.data && typeof value.data === "object") return jobsFrom(value.data);
+    if (value.result && typeof value.result === "object") return jobsFrom(value.result);
+    return [];
+  }
+  const job = jobsFrom(payload).find((candidate) =>
+    (candidate.name || candidate.payload?.name || candidate.title) === name
+  );
+  if (job) process.stdout.write(String(job.id || job.jobId || job.key || job.name || ""));
+});
+' "$name"
+}
+
+upsert_digest_job() {
   local schedule="$1"
   local name="$2"
-  local prompt="$3"
+  local slot="$3"
+  local command_argv
+  command_argv="$(node -e 'console.log(JSON.stringify(["node", process.argv[1], "--slot", process.argv[2]]))' "${APP_DIR}/src/cron/run-personal-digest.js" "$slot")"
+  local existing_id
+  existing_id="$(job_id_by_name "$name" || true)"
 
-  if openclaw cron list 2>/dev/null | grep -Fq "$name"; then
-    echo "[skip] cron already exists: $name"
+  if [ -n "$existing_id" ]; then
+    echo "[edit] $name -> $schedule ($TZ_NAME), slot=$slot"
+    openclaw cron edit "$existing_id" \
+      --cron "$schedule" \
+      --tz "$TZ_NAME" \
+      --command-argv "$command_argv" \
+      --command-cwd "$APP_DIR" \
+      --timeout-seconds "$TIMEOUT_SECONDS" \
+      --no-output-timeout-seconds "$NO_OUTPUT_TIMEOUT_SECONDS" \
+      --output-max-bytes "$OUTPUT_MAX_BYTES" \
+      --announce \
+      --channel "$CHANNEL" \
+      --to "$TARGET"
     return 0
   fi
 
-  echo "[create] $name -> $schedule ($TZ_NAME)"
-  openclaw cron create "$schedule" "$prompt" \
+  echo "[create] $name -> $schedule ($TZ_NAME), slot=$slot"
+  openclaw cron create "$schedule" \
     --name "$name" \
     --tz "$TZ_NAME" \
-    --session isolated \
+    --command-argv "$command_argv" \
+    --command-cwd "$APP_DIR" \
+    --timeout-seconds "$TIMEOUT_SECONDS" \
+    --no-output-timeout-seconds "$NO_OUTPUT_TIMEOUT_SECONDS" \
+    --output-max-bytes "$OUTPUT_MAX_BYTES" \
     --announce \
     --channel "$CHANNEL" \
     --to "$TARGET"
 }
 
-create_if_missing "0 9 * * *" \
-  "Personal digest — mañana" \
-  "Usá seed-workspace/prompts/digest.md. Prepará el digest personal de la mañana para Matías: agenda de hoy, mails/GitHub importantes, vencimientos, seguridad y próximos pasos. No mezcles Mango salvo impacto personal claro."
+upsert_digest_job "0 9 * * *" "Personal digest — mañana" "morning"
+upsert_digest_job "0 15 * * *" "Personal digest — tarde" "afternoon"
+upsert_digest_job "0 21 * * *" "Personal digest — noche" "night"
 
-create_if_missing "0 15 * * *" \
-  "Personal digest — tarde" \
-  "Usá seed-workspace/prompts/digest.md. Revisá novedades personales desde la mañana y marcá solo lo que cambia prioridades de Matías para la tarde/noche."
-
-create_if_missing "0 21 * * *" \
-  "Personal digest — noche" \
-  "Usá seed-workspace/prompts/digest.md. Cerrá el día personal de Matías: pendientes que quedan, agenda de mañana, alertas de dinero/seguridad/servicios y automatizaciones candidatas."
-
-echo "[done] Personal cron digests installed/listed."
+echo "[done] Personal command cron digests installed/updated."

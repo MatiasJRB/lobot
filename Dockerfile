@@ -18,6 +18,7 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN corepack enable && pnpm install --frozen-lockfile --prod
 
 COPY src ./src
+COPY scripts ./scripts
 COPY seed-workspace ./seed-workspace
 COPY entrypoint.sh ./entrypoint.sh
 RUN chmod +x ./entrypoint.sh

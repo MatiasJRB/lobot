@@ -10,6 +10,12 @@ import httpProxy from "http-proxy";
 import pty from "node-pty";
 import { WebSocketServer } from "ws";
 
+import {
+  collectPersonalDigest,
+  getPersonalSourceStatus,
+  renderPersonalDigest,
+} from "./personal/digest.js";
+
 const PORT = Number.parseInt(
   process.env.PORT ?? process.env.OPENCLAW_GATEWAY_PORT ?? "8080",
   10,
@@ -744,9 +750,21 @@ function runCmd(cmd, args, opts = {}) {
 }
 
 function parseJsonFromCommandOutput(output) {
-  const jsonMatch = String(output || "").match(/(\{[\s\S]*\}|\[[\s\S]*\])\s*$/);
-  if (!jsonMatch) return null;
-  return JSON.parse(jsonMatch[1]);
+  const text = String(output || "").trim();
+  if (!text) return null;
+
+  const starts = [];
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === "{" || text[i] === "[") starts.push(i);
+  }
+
+  for (let i = starts.length - 1; i >= 0; i--) {
+    try {
+      return JSON.parse(text.slice(starts[i]));
+    } catch { }
+  }
+
+  return null;
 }
 
 function pendingDeviceRequestsFromPayload(payload) {
@@ -999,22 +1017,105 @@ const PERSONAL_DIGEST_CRON_JOBS = [
   {
     schedule: "0 9 * * *",
     name: "Personal digest — mañana",
-    prompt:
-      "Usá seed-workspace/prompts/digest.md. Prepará el digest personal de la mañana para Matías: agenda de hoy, mails/GitHub importantes, vencimientos, seguridad y próximos pasos. No mezcles Mango salvo impacto personal claro.",
+    slot: "morning",
   },
   {
     schedule: "0 15 * * *",
     name: "Personal digest — tarde",
-    prompt:
-      "Usá seed-workspace/prompts/digest.md. Revisá novedades personales desde la mañana y marcá solo lo que cambia prioridades de Matías para la tarde/noche.",
+    slot: "afternoon",
   },
   {
     schedule: "0 21 * * *",
     name: "Personal digest — noche",
-    prompt:
-      "Usá seed-workspace/prompts/digest.md. Cerrá el día personal de Matías: pendientes que quedan, agenda de mañana, alertas de dinero/seguridad/servicios y automatizaciones candidatas.",
+    slot: "night",
   },
 ];
+
+function cronJobsFromListPayload(payload) {
+  if (!payload) return [];
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload.jobs)) return payload.jobs;
+  if (Array.isArray(payload.items)) return payload.items;
+  if (Array.isArray(payload.data)) return payload.data;
+  if (payload.data && typeof payload.data === "object") {
+    return cronJobsFromListPayload(payload.data);
+  }
+  if (payload.result && typeof payload.result === "object") {
+    return cronJobsFromListPayload(payload.result);
+  }
+  return [];
+}
+
+function cronJobName(job) {
+  return job?.name || job?.payload?.name || job?.title || "";
+}
+
+function cronJobId(job) {
+  return job?.id || job?.jobId || job?.key || job?.name || "";
+}
+
+function personalDigestCommandArgv(slot) {
+  return [
+    OPENCLAW_NODE,
+    path.join(process.cwd(), "src", "cron", "run-personal-digest.js"),
+    "--slot",
+    slot,
+  ];
+}
+
+function personalDigestCommandCreateArgs(job, opts) {
+  return [
+    "cron",
+    "create",
+    job.schedule,
+    "--name",
+    job.name,
+    "--tz",
+    opts.tz,
+    "--command-argv",
+    JSON.stringify(personalDigestCommandArgv(job.slot)),
+    "--command-cwd",
+    process.cwd(),
+    "--timeout-seconds",
+    String(opts.timeoutSeconds),
+    "--no-output-timeout-seconds",
+    String(opts.noOutputTimeoutSeconds),
+    "--output-max-bytes",
+    String(opts.outputMaxBytes),
+    "--announce",
+    "--channel",
+    opts.channel,
+    "--to",
+    opts.target,
+  ];
+}
+
+function personalDigestCommandEditArgs(existingJobId, job, opts) {
+  return [
+    "cron",
+    "edit",
+    existingJobId,
+    "--cron",
+    job.schedule,
+    "--tz",
+    opts.tz,
+    "--command-argv",
+    JSON.stringify(personalDigestCommandArgv(job.slot)),
+    "--command-cwd",
+    process.cwd(),
+    "--timeout-seconds",
+    String(opts.timeoutSeconds),
+    "--no-output-timeout-seconds",
+    String(opts.noOutputTimeoutSeconds),
+    "--output-max-bytes",
+    String(opts.outputMaxBytes),
+    "--announce",
+    "--channel",
+    opts.channel,
+    "--to",
+    opts.target,
+  ];
+}
 
 async function installPersonalDigestCrons(opts = {}) {
   const target = (opts.target || discordDeliveryTargetFromEnv()).trim();
@@ -1028,50 +1129,70 @@ async function installPersonalDigestCrons(opts = {}) {
 
   const channel = (opts.channel || envValue("OPENCLAW_CRON_CHANNEL") || "discord").trim();
   const tz = (opts.tz || envValue("OPENCLAW_CRON_TZ") || "America/Argentina/Buenos_Aires").trim();
-  const model = (opts.model || envValue("OPENCLAW_CRON_MODEL") || "").trim();
-  const thinking = (opts.thinking || envValue("OPENCLAW_CRON_THINKING") || "").trim();
+  const timeoutSeconds = Number.parseInt(
+    opts.timeoutSeconds || envValue("PERSONAL_DIGEST_CRON_TIMEOUT_SECONDS") || "240",
+    10,
+  );
+  const noOutputTimeoutSeconds = Number.parseInt(
+    opts.noOutputTimeoutSeconds ||
+    envValue("PERSONAL_DIGEST_CRON_NO_OUTPUT_TIMEOUT_SECONDS") ||
+    "90",
+    10,
+  );
+  const outputMaxBytes = Number.parseInt(
+    opts.outputMaxBytes || envValue("PERSONAL_DIGEST_CRON_OUTPUT_MAX_BYTES") || "20000",
+    10,
+  );
 
   await ensureGatewayRunning();
 
   const list = await runGatewayRpcWithAutoPairing(
     "cron list",
-    ["cron", "list"],
+    ["cron", "list", "--json"],
   );
   let output = `[cron list] exit=${list.code}\n${list.output || ""}\n`;
   let ok = list.code === 0;
+  let existingJobs = [];
+  try {
+    existingJobs = cronJobsFromListPayload(parseJsonFromCommandOutput(list.output));
+  } catch (err) {
+    output += `\n[cron list] could not parse JSON list output: ${err.message}\n`;
+  }
+
+  const commandOpts = {
+    target,
+    channel,
+    tz,
+    timeoutSeconds: Number.isFinite(timeoutSeconds) ? timeoutSeconds : 240,
+    noOutputTimeoutSeconds: Number.isFinite(noOutputTimeoutSeconds)
+      ? noOutputTimeoutSeconds
+      : 90,
+    outputMaxBytes: Number.isFinite(outputMaxBytes) ? outputMaxBytes : 20000,
+  };
 
   for (const job of PERSONAL_DIGEST_CRON_JOBS) {
-    if (list.output.includes(job.name)) {
-      output += `\n[skip] cron already exists: ${job.name}`;
+    const existing = existingJobs.find((candidate) => cronJobName(candidate) === job.name);
+    const existingId = existing ? cronJobId(existing) : "";
+
+    if (existingId) {
+      const edited = await runGatewayRpcWithAutoPairing(
+        `cron edit ${job.name}`,
+        personalDigestCommandEditArgs(existingId, job, commandOpts),
+      );
+      output +=
+        `\n[edit] ${job.name} -> command digest ${job.slot} (${job.schedule}, ${tz}) exit=${edited.code}\n` +
+        `${edited.output || ""}`;
+      ok = ok && edited.code === 0;
       continue;
     }
 
-    const args = [
-      "cron",
-      "create",
-      job.schedule,
-      job.prompt,
-      "--name",
-      job.name,
-      "--tz",
-      tz,
-      "--session",
-      "isolated",
-      "--announce",
-      "--channel",
-      channel,
-      "--to",
-      target,
-    ];
-
-    if (model) args.push("--model", model);
-    if (thinking) args.push("--thinking", thinking);
-
     const created = await runGatewayRpcWithAutoPairing(
       `cron create ${job.name}`,
-      args,
+      personalDigestCommandCreateArgs(job, commandOpts),
     );
-    output += `\n[create] ${job.name} -> ${job.schedule} (${tz}) exit=${created.code}\n${created.output || ""}`;
+    output +=
+      `\n[create] ${job.name} -> command digest ${job.slot} (${job.schedule}, ${tz}) exit=${created.code}\n` +
+      `${created.output || ""}`;
     ok = ok && created.code === 0;
   }
 
@@ -1397,6 +1518,40 @@ app.get("/setup/api/crons", requireSetupAuth, async (_req, res) => {
   });
 });
 
+app.get("/setup/api/personal/sources/status", requireSetupAuth, (_req, res) => {
+  res.json({
+    ok: true,
+    sources: getPersonalSourceStatus(),
+  });
+});
+
+app.get("/setup/api/personal/digest", requireSetupAuth, async (req, res) => {
+  try {
+    const slot = String(req.query.slot || "manual");
+    const format = String(req.query.format || "markdown");
+    const useGemini =
+      req.query.ai === "1" ||
+      req.query.ai === "true" ||
+      req.query.ai === "yes";
+    const data = await collectPersonalDigest({ slot });
+
+    if (format === "json") {
+      return res.json({ ok: true, data });
+    }
+
+    const text = await renderPersonalDigest(data, {
+      useGemini,
+      maxChars: Number.parseInt(String(req.query.maxChars || "8000"), 10),
+    });
+    return res.type("text/markdown").send(text);
+  } catch (err) {
+    console.error("[/setup/api/personal/digest] error:", err);
+    return res
+      .status(500)
+      .json({ ok: false, output: `Internal error: ${String(err)}` });
+  }
+});
+
 app.post("/setup/api/crons/install-personal", requireSetupAuth, async (req, res) => {
   try {
     const payload = req.body || {};
@@ -1404,8 +1559,9 @@ app.post("/setup/api/crons/install-personal", requireSetupAuth, async (req, res)
       target: payload.target,
       channel: payload.channel,
       tz: payload.tz,
-      model: payload.model,
-      thinking: payload.thinking,
+      timeoutSeconds: payload.timeoutSeconds,
+      noOutputTimeoutSeconds: payload.noOutputTimeoutSeconds,
+      outputMaxBytes: payload.outputMaxBytes,
     });
     return res.status(result.ok ? 200 : 500).json(result);
   } catch (err) {

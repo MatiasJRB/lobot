@@ -9,7 +9,9 @@ Base para el secretario personal de Matías: OpenClaw desplegado en Railway, Gem
 - Usa `GEMINI_API_KEY` desde variables Railway.
 - Usa `DISCORD_BOT_TOKEN` desde variables Railway con SecretRef.
 - Siembra instrucciones de secretario personal en el workspace.
-- Incluye scripts para crear tres digests diarios por Discord.
+- Incluye collectors server-side para Gmail, Google Calendar y GitHub.
+- Incluye scripts para crear/editar tres digests diarios por Discord usando
+  OpenClaw command cron jobs.
 
 ## Documentación del proyecto
 
@@ -27,6 +29,32 @@ Base para el secretario personal de Matías: OpenClaw desplegado en Railway, Gem
 4. Abrir `/setup`, correr onboarding y luego `/openclaw`.
 5. Configurar Discord pairing.
 6. Ejecutar `scripts/install-personal-crons.sh` cuando el gateway esté listo.
+7. Agregar credenciales read-only para Gmail/Calendar/GitHub en Railway.
+
+## Fuentes reales
+
+El comando de digest vive en:
+
+```bash
+node src/cron/run-personal-digest.js --slot morning
+```
+
+Ese comando:
+
+- Lee Gmail con Gmail API metadata/snippets, sin descargar cuerpos completos.
+- Lee Google Calendar para agenda próxima, cancelaciones y conflictos.
+- Lee GitHub notifications/search/Actions recientes del usuario `MatiasJRB`.
+- Usa Gemini para redactar/priorizar si `GEMINI_API_KEY` está disponible.
+- Si Gemini falla, genera un digest determinístico para no perder avisos.
+
+Endpoints de setup útiles:
+
+- `GET /setup/api/personal/sources/status`
+- `GET /setup/api/personal/digest?format=markdown`
+- `GET /setup/api/personal/digest?format=markdown&ai=1`
+- `GET /setup/api/personal/digest?format=json`
+
+Todos requieren `SETUP_PASSWORD`.
 
 ## Secreto Gemini
 
