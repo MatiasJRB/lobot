@@ -244,6 +244,26 @@ async function syncAllowedOrigins() {
   }
 }
 
+async function syncGatewayRuntimeConfig() {
+  await syncAllowedOrigins();
+
+  const tokenResult = await runCmd(
+    OPENCLAW_NODE,
+    clawArgs([
+      "config",
+      "set",
+      "gateway.auth.token",
+      OPENCLAW_GATEWAY_TOKEN,
+    ]),
+    { secrets: [OPENCLAW_GATEWAY_TOKEN] },
+  );
+  if (tokenResult.code === 0) {
+    console.log("gateway", "synced gateway.auth.token from OPENCLAW_GATEWAY_TOKEN");
+  } else {
+    console.warn("gateway", `failed to sync gateway.auth.token (exit=${tokenResult.code})`);
+  }
+}
+
 let gatewayProc = null;
 let gatewayStarting = null;
 let shuttingDown = false;
@@ -360,7 +380,7 @@ async function ensureGatewayRunning() {
   if (gatewayProc) return { ok: true };
   if (!gatewayStarting) {
     gatewayStarting = (async () => {
-      await syncAllowedOrigins();
+      await syncGatewayRuntimeConfig();
       await startGateway();
       const ready = await waitForGatewayReady({ timeoutMs: 60_000 });
       if (!ready) {
