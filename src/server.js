@@ -806,7 +806,11 @@ async function installPersonalDigestCrons(opts = {}) {
 
   await ensureGatewayRunning();
 
-  const list = await runCmd(OPENCLAW_NODE, clawArgs(["cron", "list"]));
+  const list = await runCmd(
+    OPENCLAW_NODE,
+    clawArgs(["cron", "list", "--token", OPENCLAW_GATEWAY_TOKEN]),
+    { secrets: [OPENCLAW_GATEWAY_TOKEN] },
+  );
   let output = `[cron list] exit=${list.code}\n${list.output || ""}\n`;
   let ok = list.code === 0;
 
@@ -832,12 +836,16 @@ async function installPersonalDigestCrons(opts = {}) {
       channel,
       "--to",
       target,
+      "--token",
+      OPENCLAW_GATEWAY_TOKEN,
     ];
 
     if (model) args.push("--model", model);
     if (thinking) args.push("--thinking", thinking);
 
-    const created = await runCmd(OPENCLAW_NODE, clawArgs(args));
+    const created = await runCmd(OPENCLAW_NODE, clawArgs(args), {
+      secrets: [OPENCLAW_GATEWAY_TOKEN],
+    });
     output += `\n[create] ${job.name} -> ${job.schedule} (${tz}) exit=${created.code}\n${created.output || ""}`;
     ok = ok && created.code === 0;
   }
@@ -1199,7 +1207,10 @@ app.post("/setup/api/discord/test", requireSetupAuth, async (req, res) => {
         target,
         "--message",
         message,
+        "--token",
+        OPENCLAW_GATEWAY_TOKEN,
       ]),
+      { secrets: [OPENCLAW_GATEWAY_TOKEN] },
     );
     return res.status(result.code === 0 ? 200 : 500).json({
       ok: result.code === 0,
