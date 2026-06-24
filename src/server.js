@@ -172,7 +172,7 @@ function buildDiscordGuildConfigFromEnv() {
 
   if (channelId) {
     guildConfig.channels = {
-      [channelId]: { allow: true, requireMention },
+      [channelId]: { requireMention },
     };
   }
 
