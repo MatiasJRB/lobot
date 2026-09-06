@@ -1,6 +1,23 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { markSeen, pruneStore, selectNewSignals, signalKey } from "./reactive-store.js";
+import { markSeen, pruneStore, reactiveCandidates, selectNewSignals, signalKey } from "./reactive-store.js";
+
+test("reactiveCandidates filters by min priority and source allowlist", () => {
+  const signals = [
+    { source: "Gmail", priority: "P0", title: "sec" },
+    { source: "Gmail", priority: "P1", title: "reply" },
+    { source: "GitHub", priority: "P0", title: "pr" },
+    { source: "Calendar", priority: "P0", title: "conflict" },
+  ];
+  const p0GmailCal = reactiveCandidates(signals, { minPriority: "P0", sources: ["gmail", "calendar"] });
+  assert.deepEqual(p0GmailCal.map((s) => s.title), ["sec", "conflict"]);
+
+  const p1Gmail = reactiveCandidates(signals, { minPriority: "P1", sources: ["gmail"] });
+  assert.deepEqual(p1Gmail.map((s) => s.title), ["sec", "reply"]);
+
+  const noSourceFilter = reactiveCandidates(signals, { minPriority: "P0" });
+  assert.deepEqual(noSourceFilter.map((s) => s.title), ["sec", "pr", "conflict"]);
+});
 
 test("selectNewSignals returns unseen signals and dedupes within the batch", () => {
   const store = { seen: {} };

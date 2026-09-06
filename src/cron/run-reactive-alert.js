@@ -6,17 +6,20 @@ import {
   loadStore,
   markSeen,
   pruneStore,
+  reactiveCandidates,
   resolveStatePath,
   saveStore,
   selectNewSignals,
 } from "../personal/reactive-store.js";
 
 // Reactive personal alert: reuses the digest collectors but only pushes when
-// a NEW urgent (P0/P1 by default) signal appears since the last run. Intended
-// to run on a high-frequency cron. When there is nothing new it prints no
-// output at all, so the cron delivers nothing to the channel.
+// a NEW urgent signal appears since the last run. Defaults to P0-only and to
+// Gmail/Calendar sources, because those are the "cannot wait" interrupts;
+// GitHub PR/CI notifications stay in the digest. Intended to run on a
+// high-frequency cron. When there is nothing new it prints no output at all,
+// so the cron delivers nothing to the channel.
 
-const PRIORITY_ORDER = { P0: 0, P1: 1, P2: 2, P3: 3 };
+const VALID_PRIORITIES = new Set(["P0", "P1", "P2", "P3"]);
 
 function argValue(name, fallback = "") {
   const prefix = `--${name}=`;
@@ -34,8 +37,15 @@ function hasFlag(name) {
 }
 
 function minPriority() {
-  const raw = (argValue("min-priority", envValue("REACTIVE_ALERT_MIN_PRIORITY", "P1")) || "P1").toUpperCase();
-  return PRIORITY_ORDER[raw] === undefined ? "P1" : raw;
+  const raw = (argValue("min-priority", envValue("REACTIVE_ALERT_MIN_PRIORITY", "P0")) || "P0").toUpperCase();
+  return VALID_PRIORITIES.has(raw) ? raw : "P0";
+}
+
+function sourceAllowlist() {
+  return argValue("sources", envValue("REACTIVE_ALERT_SOURCES", "gmail,calendar"))
+    .split(",")
+    .map((source) => source.trim())
+    .filter(Boolean);
 }
 
 function alertLine(signal, tz) {
@@ -50,12 +60,12 @@ async function main() {
   const format = argValue("format", "text");
   const persist = !hasFlag("dry-run") && !hasFlag("no-persist");
   const min = minPriority();
-  const threshold = PRIORITY_ORDER[min];
+  const sources = sourceAllowlist();
   const now = new Date();
 
   const data = await collectPersonalDigest({ slot: "manual", now });
   const tz = data.window?.timezone || envValue("DEFAULT_TIMEZONE", "America/Argentina/Buenos_Aires");
-  const urgent = (data.signals || []).filter((signal) => (PRIORITY_ORDER[signal.priority] ?? 9) <= threshold);
+  const urgent = reactiveCandidates(data.signals, { minPriority: min, sources });
 
   const statePath = resolveStatePath();
   let store = pruneStore(loadStore(statePath), {
@@ -79,6 +89,7 @@ async function main() {
         {
           generatedAt: data.generatedAt,
           minPriority: min,
+          sources,
           urgentCount: urgent.length,
           newCount: fresh.length,
           alerted: toAlert,

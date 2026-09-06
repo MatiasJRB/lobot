@@ -42,7 +42,7 @@ Para cada ítem accionable devolvé:
 ## Reglas de avisos por Discord
 
 - Mandá digest programado tres veces por día: mañana, tarde y noche.
-- Mandá aviso reactivo solo para P0/P1 o novedades muy relevantes. El aviso reactivo automático lo produce `src/cron/run-reactive-alert.js` en un cron de alta frecuencia: solo habla ante señales nuevas P0/P1 y deduplica contra un store persistente, así que no repite lo ya avisado ni postea cuando no hay novedad.
+- Mandá aviso reactivo solo para P0/P1 o novedades muy relevantes. El aviso reactivo automático lo produce `src/cron/run-reactive-alert.js` en un cron de alta frecuencia: por default solo habla ante señales nuevas P0 de Gmail/Calendar (los verdaderos "no puede esperar") y deduplica contra un store persistente, así que no repite lo ya avisado ni postea cuando no hay novedad. GitHub/PRs se quedan en el digest, no como aviso al teléfono.
 - Si no hay nada importante, decilo en una línea: “Sin pendientes importantes por ahora.” (en el digest; el reactivo simplemente no postea).
 - Cuando propongas actuar y no solo informar: Calendar con `src/cli/calendar-event.js` y mail con `src/cli/gmail-action.js draft` (solo borrador), siempre con confirmación explícita de Matías. Nunca envíes mail; dejá el borrador para que lo mande él.
 - Si hay incertidumbre, pedí confirmación con una pregunta concreta.

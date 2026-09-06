@@ -8,6 +8,22 @@ import path from "node:path";
 
 const DEFAULT_TTL_HOURS = 168; // 7 days
 
+const PRIORITY_ORDER = { P0: 0, P1: 1, P2: 2, P3: 3 };
+
+// Narrow the digest signals down to what should interrupt reactively:
+// at or above `minPriority`, and (optionally) only from `sources`. Reactive
+// interrupts default to P0-only and to Gmail/Calendar because GitHub PR/CI
+// notifications are digest material, not phone alerts.
+export function reactiveCandidates(signals, { minPriority = "P0", sources } = {}) {
+  const threshold = PRIORITY_ORDER[minPriority] ?? 0;
+  const allow = sources && sources.length ? new Set(sources.map((s) => String(s).toLowerCase())) : null;
+  return (signals || []).filter((signal) => {
+    if ((PRIORITY_ORDER[signal.priority] ?? 9) > threshold) return false;
+    if (allow && !allow.has(String(signal.source || "").toLowerCase())) return false;
+    return true;
+  });
+}
+
 // Same key shape used by digest.dedupeSignals, so a signal is identified
 // consistently across the digest and the reactive path.
 export function signalKey(signal) {
