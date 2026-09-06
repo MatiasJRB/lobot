@@ -28,7 +28,7 @@ Base para el secretario personal de Matías: OpenClaw desplegado en Railway, Gem
 3. Setear variables desde `.env.example`.
 4. Abrir `/setup`, correr onboarding y luego `/openclaw`.
 5. Configurar Discord pairing.
-6. Ejecutar `scripts/install-personal-crons.sh` cuando el gateway esté listo.
+6. Ejecutar `scripts/install-personal-crons.sh` (digests) y `scripts/install-reactive-alert-cron.sh` (alertas reactivas P0/P1) cuando el gateway esté listo.
 7. Agregar credenciales para Gmail/Calendar/GitHub (Calendar puede incluir write de eventos) en Railway.
 
 ## Fuentes reales
@@ -65,6 +65,18 @@ La API key real no vive en este repo. Está guardada localmente en:
 ```
 
 Ese directorio está gitignored desde el root del workspace.
+
+## Alertas reactivas y acciones
+
+- **Alertas reactivas**: `scripts/install-reactive-alert-cron.sh` instala un cron de alta frecuencia que corre `src/cron/run-reactive-alert.js`. Reusa los collectors del digest, filtra a P0/P1 (`REACTIVE_ALERT_MIN_PRIORITY`) y solo avisa por señales **nuevas** — deduplica contra un store persistente (`/data/personal-reactive-state.json`), así que si no hay novedad no postea nada. Inspección sin postear:
+
+```bash
+node src/cron/run-reactive-alert.js --format json --dry-run
+```
+
+- **Acciones (reportar → actuar)**, siempre con `--confirm`:
+  - Calendar: `node src/cli/calendar-event.js` (`create`/`update`/`delete`), requiere `CALENDAR_WRITE_ENABLED=true`.
+  - Gmail (borradores, **nunca envía**): `node src/cli/gmail-action.js draft`, requiere `GMAIL_WRITE_ENABLED=true` y scope `gmail.compose` en el refresh token.
 
 ## Upstream/docs relevantes
 
