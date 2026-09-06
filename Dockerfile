@@ -41,7 +41,7 @@ ENV OPENCLAW_GATEWAY_PORT=8080
 ENV OPENCLAW_STATE_DIR=/data/.openclaw
 ENV OPENCLAW_WORKSPACE_DIR=/data/workspace
 ENV OPENCLAW_ENTRY=/usr/local/lib/node_modules/openclaw/dist/entry.js
-ENV OPENCLAW_VERSION=2026.9.2
+ENV OPENCLAW_VERSION=2026.7.1-2
 EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \

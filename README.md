@@ -68,7 +68,7 @@ Ese directorio está gitignored desde el root del workspace.
 
 ## Alertas reactivas y acciones
 
-- **Alertas reactivas**: `scripts/install-reactive-alert-cron.sh` instala un cron de alta frecuencia que corre `src/cron/run-reactive-alert.js`. Reusa los collectors del digest, filtra a P0 por default (`REACTIVE_ALERT_MIN_PRIORITY`) y a Gmail/Calendar (`REACTIVE_ALERT_SOURCES`; GitHub se queda en el digest) y solo avisa por señales **nuevas** — deduplica contra un store persistente (`/data/personal-reactive-state.json`), así que si no hay novedad no postea nada. Inspección sin postear:
+- **Alertas reactivas**: instalá el cron con `POST /setup/api/crons/install-reactive` (vía canónica, como los digests; el script `scripts/install-reactive-alert-cron.sh` es solo el equivalente shell). Corre `src/cron/run-reactive-alert.js` en alta frecuencia. Reusa los collectors del digest, filtra a P0 por default (`REACTIVE_ALERT_MIN_PRIORITY`) y a Gmail/Calendar (`REACTIVE_ALERT_SOURCES`; GitHub se queda en el digest) y solo avisa por señales **nuevas** — deduplica contra un store persistente (`/data/personal-reactive-state.json`), así que si no hay novedad no postea nada. Inspección sin postear:
 
 ```bash
 node src/cron/run-reactive-alert.js --format json --dry-run

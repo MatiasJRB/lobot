@@ -1231,6 +1231,153 @@ async function installPersonalDigestCrons(opts = {}) {
   return { ok, output };
 }
 
+const REACTIVE_ALERT_CRON_JOB_NAME = "Personal reactive alerts";
+
+function reactiveAlertSchedule() {
+  return (envValue("REACTIVE_ALERT_CRON") || "*/15 * * * *").trim();
+}
+
+function personalReactiveCommandArgv() {
+  return [
+    OPENCLAW_NODE,
+    path.join(process.cwd(), "src", "cron", "run-reactive-alert.js"),
+  ];
+}
+
+function reactiveAlertCommandCreateArgs(schedule, opts) {
+  return [
+    "cron",
+    "create",
+    schedule,
+    "--name",
+    REACTIVE_ALERT_CRON_JOB_NAME,
+    "--tz",
+    opts.tz,
+    "--command-argv",
+    JSON.stringify(personalReactiveCommandArgv()),
+    "--command-cwd",
+    process.cwd(),
+    "--timeout-seconds",
+    String(opts.timeoutSeconds),
+    "--no-output-timeout-seconds",
+    String(opts.noOutputTimeoutSeconds),
+    "--output-max-bytes",
+    String(opts.outputMaxBytes),
+    "--announce",
+    "--channel",
+    opts.channel,
+    "--to",
+    opts.target,
+  ];
+}
+
+function reactiveAlertCommandEditArgs(existingJobId, schedule, opts) {
+  return [
+    "cron",
+    "edit",
+    existingJobId,
+    "--cron",
+    schedule,
+    "--tz",
+    opts.tz,
+    "--command-argv",
+    JSON.stringify(personalReactiveCommandArgv()),
+    "--command-cwd",
+    process.cwd(),
+    "--timeout-seconds",
+    String(opts.timeoutSeconds),
+    "--no-output-timeout-seconds",
+    String(opts.noOutputTimeoutSeconds),
+    "--output-max-bytes",
+    String(opts.outputMaxBytes),
+    "--announce",
+    "--channel",
+    opts.channel,
+    "--to",
+    opts.target,
+  ];
+}
+
+// Reactive alert cron: a single high-frequency job that runs the reactive
+// collector. Mirrors installPersonalDigestCrons so it goes through the same
+// auto-pairing RPC path (a bare CLI call lacks the operator scope).
+async function installReactiveAlertCron(opts = {}) {
+  const target = (opts.target || discordDeliveryTargetFromEnv()).trim();
+  if (!target) {
+    return {
+      ok: false,
+      output:
+        "Missing Discord delivery target. Set DISCORD_PERSONAL_CHANNEL_TARGET or DISCORD_PERSONAL_CHANNEL_ID.",
+    };
+  }
+
+  const channel = (opts.channel || envValue("OPENCLAW_CRON_CHANNEL") || "discord").trim();
+  const tz = (opts.tz || envValue("OPENCLAW_CRON_TZ") || "America/Argentina/Buenos_Aires").trim();
+  const schedule = (opts.schedule || reactiveAlertSchedule()).trim();
+  const timeoutSeconds = Number.parseInt(
+    opts.timeoutSeconds || envValue("REACTIVE_ALERT_CRON_TIMEOUT_SECONDS") || "120",
+    10,
+  );
+  const noOutputTimeoutSeconds = Number.parseInt(
+    opts.noOutputTimeoutSeconds ||
+      envValue("REACTIVE_ALERT_CRON_NO_OUTPUT_TIMEOUT_SECONDS") ||
+      "60",
+    10,
+  );
+  const outputMaxBytes = Number.parseInt(
+    opts.outputMaxBytes || envValue("REACTIVE_ALERT_CRON_OUTPUT_MAX_BYTES") || "8000",
+    10,
+  );
+
+  await ensureGatewayRunning();
+
+  const list = await runGatewayRpcWithAutoPairing("cron list", ["cron", "list", "--json"]);
+  let output = `[cron list] exit=${list.code}\n${list.output || ""}\n`;
+  let ok = list.code === 0;
+  let existingJobs = [];
+  try {
+    existingJobs = cronJobsFromListPayload(parseJsonFromCommandOutput(list.output));
+  } catch (err) {
+    output += `\n[cron list] could not parse JSON list output: ${err.message}\n`;
+  }
+
+  const commandOpts = {
+    target,
+    channel,
+    tz,
+    timeoutSeconds: Number.isFinite(timeoutSeconds) ? timeoutSeconds : 120,
+    noOutputTimeoutSeconds: Number.isFinite(noOutputTimeoutSeconds) ? noOutputTimeoutSeconds : 60,
+    outputMaxBytes: Number.isFinite(outputMaxBytes) ? outputMaxBytes : 8000,
+  };
+
+  const existing = existingJobs.find(
+    (candidate) => cronJobName(candidate) === REACTIVE_ALERT_CRON_JOB_NAME,
+  );
+  const existingId = existing ? cronJobId(existing) : "";
+
+  if (existingId) {
+    const edited = await runGatewayRpcWithAutoPairing(
+      `cron edit ${REACTIVE_ALERT_CRON_JOB_NAME}`,
+      reactiveAlertCommandEditArgs(existingId, schedule, commandOpts),
+    );
+    output +=
+      `\n[edit] ${REACTIVE_ALERT_CRON_JOB_NAME} -> reactive (${schedule}, ${tz}) exit=${edited.code}\n` +
+      `${edited.output || ""}`;
+    ok = ok && edited.code === 0;
+  } else {
+    const created = await runGatewayRpcWithAutoPairing(
+      `cron create ${REACTIVE_ALERT_CRON_JOB_NAME}`,
+      reactiveAlertCommandCreateArgs(schedule, commandOpts),
+    );
+    output +=
+      `\n[create] ${REACTIVE_ALERT_CRON_JOB_NAME} -> reactive (${schedule}, ${tz}) exit=${created.code}\n` +
+      `${created.output || ""}`;
+    ok = ok && created.code === 0;
+  }
+
+  return { ok, output };
+}
+
 const VALID_AUTH_CHOICES = [
   "openai-api-key",
   "apiKey",
@@ -1606,6 +1753,27 @@ app.post("/setup/api/crons/install-personal", requireSetupAuth, async (req, res)
     return res.status(result.ok ? 200 : 500).json(result);
   } catch (err) {
     console.error("[/setup/api/crons/install-personal] error:", err);
+    return res
+      .status(500)
+      .json({ ok: false, output: `Internal error: ${String(err)}` });
+  }
+});
+
+app.post("/setup/api/crons/install-reactive", requireSetupAuth, async (req, res) => {
+  try {
+    const payload = req.body || {};
+    const result = await installReactiveAlertCron({
+      target: payload.target,
+      channel: payload.channel,
+      tz: payload.tz,
+      schedule: payload.schedule,
+      timeoutSeconds: payload.timeoutSeconds,
+      noOutputTimeoutSeconds: payload.noOutputTimeoutSeconds,
+      outputMaxBytes: payload.outputMaxBytes,
+    });
+    return res.status(result.ok ? 200 : 500).json(result);
+  } catch (err) {
+    console.error("[/setup/api/crons/install-reactive] error:", err);
     return res
       .status(500)
       .json({ ok: false, output: `Internal error: ${String(err)}` });

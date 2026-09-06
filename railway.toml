@@ -13,4 +13,4 @@ OPENCLAW_STATE_DIR = "/data/.openclaw"
 OPENCLAW_WORKSPACE_DIR = "/data/workspace"
 # Pinned (was "latest"): stop unattended major/minor drift on reboot. See
 # geome7ric-engineering#17. Bump deliberately after verifying the new version.
-OPENCLAW_VERSION = "2026.9.2"
+OPENCLAW_VERSION = "2026.7.1-2"

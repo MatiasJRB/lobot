@@ -44,6 +44,23 @@ Usa `DISCORD_PERSONAL_CHANNEL_TARGET`, por ejemplo:
 DISCORD_PERSONAL_CHANNEL_TARGET=channel:123456789012345678
 ```
 
+## Cron reactivo
+
+Endpoint recomendado (mismo patrón que los digests; instala/actualiza un único
+job de alta frecuencia):
+
+```text
+POST /setup/api/crons/install-reactive
+```
+
+El job corre `node src/cron/run-reactive-alert.js`: reusa los collectors, filtra
+a P0 y a Gmail/Calendar por default (`REACTIVE_ALERT_MIN_PRIORITY` /
+`REACTIVE_ALERT_SOURCES`) y solo entrega cuando hay una señal **nueva**
+(dedup persistente en `/data`). Schedule por `REACTIVE_ALERT_CRON` (default
+`*/15 * * * *`). El script `scripts/install-reactive-alert-cron.sh` es el
+equivalente shell, pero `openclaw cron` suelto por ssh falla con
+`missing scope: operator`; usá el endpoint.
+
 ## Fuentes reales
 
 Estado de credenciales:
