@@ -118,7 +118,8 @@ CODEX_BRIDGE_URL=https://<servicio-railway>/bridge/api
 CODEX_BRIDGE_TOKEN=<mismo secreto>
 CODEX_BRIDGE_WORKER_ID=matias-mac
 CODEX_PATH=/ruta/absoluta/a/codex
-NODE_PATH=/ruta/absoluta/a/node
+CODEX_BRIDGE_NODE_PATH=/ruta/absoluta/a/node
+CODEX_BRIDGE_DEFAULT_CWD=/Users/matiasrios/Documents/GitHub
 ```
 
 Instalar o reinstalar el worker:
@@ -138,7 +139,9 @@ node src/bridge/worker.js --once
 node src/cli/codex-bridge.js status --job-id <job-id>
 ```
 
-El inventario de hilos expira si el worker no manda heartbeat. Un trabajo
+El instalador copia el runtime mínimo a `~/.local/lib` para que LaunchAgent no
+dependa del acceso protegido de macOS a `Documents`. El inventario de hilos
+expira si el worker no manda heartbeat. Un trabajo
 `running` puede ser reclamado por otro worker sólo cuando vence su lease. Para
 reintentar únicamente la entrega de un resultado ya calculado, usar:
 

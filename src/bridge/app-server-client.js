@@ -122,6 +122,12 @@ export class CodexAppServerClient extends EventEmitter {
       this.#handleLine(line);
     });
     this.child.stderr?.on("data", (chunk) => this.emit("stderr", chunk.toString()));
+    this.child.stdin.on("error", (error) => this.emit("protocolError", error));
+    this.child.on("error", (error) => {
+      for (const pending of this.pending.values()) pending.reject(error);
+      this.pending.clear();
+      this.emit("protocolError", error);
+    });
     this.child.on("exit", (code, signal) => {
       const error = new Error(`Codex App Server exited (code=${code}, signal=${signal})`);
       for (const pending of this.pending.values()) pending.reject(error);
@@ -187,7 +193,8 @@ export class CodexAppServerClient extends EventEmitter {
   async runJob(job, { timeoutMs = 30 * 60 * 1000 } = {}) {
     const threads = await this.listThreads();
     const selected = resolveThread(threads, job.threadSelector);
-    const cwd = job.cwd || selected?.cwd || process.cwd();
+    const cwd =
+      job.cwd || selected?.cwd || process.env.CODEX_BRIDGE_DEFAULT_CWD?.trim() || process.cwd();
     const mode = job.mode || "read-only";
     let thread;
 
@@ -276,6 +283,9 @@ export class CodexAppServerClient extends EventEmitter {
   }
 
   #write(message) {
+    if (!this.child?.stdin?.writable) {
+      throw new Error("Codex App Server input is not writable");
+    }
     this.child.stdin.write(`${JSON.stringify(message)}\n`);
   }
 

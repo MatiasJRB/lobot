@@ -4,7 +4,8 @@ set -euo pipefail
 LABEL="com.geome7ric.secretario.codex-bridge"
 REPO_DIR="${SECRETARIO_PERSONAL_REPO:-/Users/matiasrios/Documents/GitHub/secretario-personal}"
 PLIST="${HOME}/Library/LaunchAgents/${LABEL}.plist"
-RUNNER="${REPO_DIR}/scripts/run-codex-bridge-worker.sh"
+INSTALL_DIR="${HOME}/.local/lib/secretario-personal-codex-bridge"
+RUNNER="${INSTALL_DIR}/run-codex-bridge-worker.sh"
 ENV_FILE="${CODEX_BRIDGE_ENV_FILE:-${HOME}/.config/secretario-personal/codex-bridge.env}"
 LOG_DIR="${HOME}/Library/Logs/secretario-personal"
 
@@ -15,8 +16,8 @@ if [[ "${1:-}" == "--uninstall" ]]; then
   exit 0
 fi
 
-if [[ ! -x "$RUNNER" ]]; then
-  echo "Runner is not executable: $RUNNER" >&2
+if [[ ! -r "${REPO_DIR}/scripts/run-codex-bridge-worker.sh" ]]; then
+  echo "Runner source is not readable in repo: ${REPO_DIR}" >&2
   exit 1
 fi
 if [[ ! -r "$ENV_FILE" ]]; then
@@ -24,8 +25,17 @@ if [[ ! -r "$ENV_FILE" ]]; then
   exit 1
 fi
 
-mkdir -p "${HOME}/Library/LaunchAgents" "$LOG_DIR"
+mkdir -p "${HOME}/Library/LaunchAgents" "$LOG_DIR" "$INSTALL_DIR"
 chmod 600 "$ENV_FILE"
+cp "${REPO_DIR}/scripts/run-codex-bridge-worker.sh" "$RUNNER"
+cp "${REPO_DIR}/src/bridge/worker.js" "${INSTALL_DIR}/worker.js"
+cp "${REPO_DIR}/src/bridge/api-client.js" "${INSTALL_DIR}/api-client.js"
+cp "${REPO_DIR}/src/bridge/app-server-client.js" "${INSTALL_DIR}/app-server-client.js"
+cat > "${INSTALL_DIR}/package.json" <<'JSON'
+{"private":true,"type":"module"}
+JSON
+chmod 755 "$RUNNER" "${INSTALL_DIR}/worker.js"
+chmod 644 "${INSTALL_DIR}/api-client.js" "${INSTALL_DIR}/app-server-client.js" "${INSTALL_DIR}/package.json"
 
 cat > "$PLIST" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -54,7 +64,15 @@ PLIST
 
 plutil -lint "$PLIST"
 launchctl bootout "gui/${UID}/${LABEL}" 2>/dev/null || true
-launchctl bootstrap "gui/${UID}" "$PLIST"
+for attempt in 1 2 3 4 5; do
+  if launchctl bootstrap "gui/${UID}" "$PLIST"; then
+    break
+  fi
+  if [[ "$attempt" == "5" ]]; then
+    echo "Could not bootstrap ${LABEL} after ${attempt} attempts" >&2
+    exit 1
+  fi
+  sleep 1
+done
 launchctl kickstart -k "gui/${UID}/${LABEL}"
 echo "Installed and started ${LABEL}"
-
