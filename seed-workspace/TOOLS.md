@@ -18,3 +18,12 @@
 - Para cambios de configuración usá `openclaw config set`/Control UI y luego `openclaw doctor --fix`.
 - Para Discord usá tokens desde variables de entorno o SecretRef. Nunca pegues tokens en mensajes o logs.
 - Para GitHub/Gmail/Calendar, si faltan credenciales o sesión, pedí el mínimo acceso necesario y explicá para qué.
+- Puente Codex Mac: cuando Matías pida consultar o disparar un hilo de Codex,
+  usá la CLI determinista y no intentes resolver la tarea con Gemini. Para ver
+  destinos: `node /app/src/cli/codex-bridge.js threads`. Para encolar:
+  `node /app/src/cli/codex-bridge.js enqueue --thread "<recent|new|id|título>" --prompt "<pedido exacto>" --idempotency-key "<id estable del mensaje inbound>"`.
+  El selector por título debe ser inequívoco; si la CLI o el resultado devuelve
+  candidatos, mostráselos a Matías para que elija. Usá `read-only` por defecto y
+  agregá `--mode workspace-write` sólo cuando Matías pida expresamente modificar
+  archivos. El resultado vuelve automáticamente a su WhatsApp: no sostengas una
+  espera larga dentro del turno de Gemini.

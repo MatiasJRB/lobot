@@ -101,6 +101,55 @@ Credenciales necesarias en Railway:
 
 El digest collector no muta Gmail/Calendar/GitHub: no archiva, no borra, no responde y no modifica issues/PRs.
 
+## Puente WhatsApp ↔ Codex Mac
+
+Variables Railway:
+
+```env
+CODEX_BRIDGE_TOKEN=<secreto aleatorio compartido>
+CODEX_BRIDGE_STATE_DIR=/data
+WHATSAPP_PERSONAL_TARGET=<destino personal ya configurado>
+```
+
+Archivo local `~/.config/secretario-personal/codex-bridge.env` (modo `0600`):
+
+```env
+CODEX_BRIDGE_URL=https://<servicio-railway>/bridge/api
+CODEX_BRIDGE_TOKEN=<mismo secreto>
+CODEX_BRIDGE_WORKER_ID=matias-mac
+CODEX_PATH=/ruta/absoluta/a/codex
+NODE_PATH=/ruta/absoluta/a/node
+```
+
+Instalar o reinstalar el worker:
+
+```bash
+chmod +x scripts/run-codex-bridge-worker.sh scripts/install-codex-bridge-launch-agent.sh
+scripts/install-codex-bridge-launch-agent.sh
+launchctl print gui/$UID/com.geome7ric.secretario.codex-bridge
+```
+
+Probar la API/worker sin WhatsApp:
+
+```bash
+node src/cli/codex-bridge.js threads
+node src/cli/codex-bridge.js enqueue --thread "recent" --prompt "Respondé solamente: puente listo" --no-reply
+node src/bridge/worker.js --once
+node src/cli/codex-bridge.js status --job-id <job-id>
+```
+
+El inventario de hilos expira si el worker no manda heartbeat. Un trabajo
+`running` puede ser reclamado por otro worker sólo cuando vence su lease. Para
+reintentar únicamente la entrega de un resultado ya calculado, usar:
+
+```text
+POST /bridge/api/jobs/<job-id>/deliver
+```
+
+No exponer Codex App Server: el worker siempre inicia la conexión desde la Mac.
+El bridge rechaza `danger-full-access`, usa `read-only` por defecto y sólo
+entrega automáticamente al target personal.
+
 Calendar write opcional:
 
 ```bash

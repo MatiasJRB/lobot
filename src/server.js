@@ -10,6 +10,8 @@ import httpProxy from "http-proxy";
 import pty from "node-pty";
 import { WebSocketServer } from "ws";
 
+import { createBridgeRouter } from "./bridge/routes.js";
+import { BridgeStore, resolveBridgeStatePath } from "./bridge/store.js";
 import {
   collectPersonalDigest,
   getPersonalSourceStatus,
@@ -28,6 +30,8 @@ const WORKSPACE_DIR =
   path.join(STATE_DIR, "workspace");
 
 const SETUP_PASSWORD = process.env.SETUP_PASSWORD?.trim();
+const CODEX_BRIDGE_TOKEN = process.env.CODEX_BRIDGE_TOKEN?.trim() || "";
+const codexBridgeStore = new BridgeStore(resolveBridgeStatePath());
 
 function resolveGatewayToken() {
   const envTok = process.env.OPENCLAW_GATEWAY_TOKEN?.trim();
@@ -512,6 +516,42 @@ function requireSetupAuth(req, res, next) {
 const app = express();
 app.disable("x-powered-by");
 app.use(express.json({ limit: "1mb" }));
+
+async function deliverCodexBridgeJob(job) {
+  const target = envValue("WHATSAPP_PERSONAL_TARGET");
+  if (!target) throw new Error("WHATSAPP_PERSONAL_TARGET is not configured");
+  await ensureGatewayRunning();
+  const label = job.threadName || job.threadId || "hilo elegido";
+  const body = job.response || `No pude completar el pedido: ${job.error || "error desconocido"}`;
+  const message = `Codex · ${label}\n\n${body}`.slice(0, 3900);
+  const result = await runCmd(
+    OPENCLAW_NODE,
+    clawArgs([
+      "message",
+      "send",
+      "--channel",
+      "whatsapp",
+      "--account",
+      "default",
+      "--target",
+      target,
+      "--message",
+      message,
+    ]),
+  );
+  if (result.code !== 0) {
+    throw new Error(`OpenClaw WhatsApp delivery failed (exit=${result.code})`);
+  }
+}
+
+app.use(
+  "/bridge/api",
+  createBridgeRouter({
+    store: codexBridgeStore,
+    token: CODEX_BRIDGE_TOKEN,
+    deliverJob: deliverCodexBridgeJob,
+  }),
+);
 
 app.get("/healthz", async (_req, res) => {
   let gateway = "unconfigured";

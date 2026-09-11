@@ -1,0 +1,65 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { ThreadSelectorError } from "./app-server-client.js";
+import { runWorkerOnce } from "./worker.js";
+
+function apiFixture(job) {
+  const calls = [];
+  return {
+    calls,
+    async heartbeat(input) {
+      calls.push(["heartbeat", input]);
+      return { ok: true };
+    },
+    async claimJob(workerId) {
+      calls.push(["claim", workerId]);
+      return { job };
+    },
+    async completeJob(jobId, result) {
+      calls.push(["complete", jobId, result]);
+      return { job: { id: jobId, ...result }, delivery: { ok: true } };
+    },
+  };
+}
+
+test("runWorkerOnce publishes threads and completes a claimed job", async () => {
+  const api = apiFixture({ id: "job-1", prompt: "hola" });
+  const codex = {
+    async listThreads() {
+      return [{ id: "thread-1", name: "Secretario", updatedAt: 10 }];
+    },
+    async runJob() {
+      return { threadId: "thread-1", threadName: "Secretario", response: "respuesta" };
+    },
+  };
+  const result = await runWorkerOnce({ api, codex, workerId: "mac" });
+  assert.equal(result.processed, true);
+  assert.equal(api.calls[0][0], "heartbeat");
+  assert.equal(api.calls[2][2].status, "done");
+  assert.equal(api.calls[2][2].response, "respuesta");
+});
+
+test("runWorkerOnce returns candidates when a selector is ambiguous", async () => {
+  const api = apiFixture({ id: "job-2", prompt: "hola" });
+  const codex = {
+    async listThreads() {
+      return [];
+    },
+    async runJob() {
+      throw new ThreadSelectorError("ambiguo", [{ id: "1", name: "Uno" }]);
+    },
+  };
+  await runWorkerOnce({ api, codex, workerId: "mac" });
+  const completion = api.calls.find(([name]) => name === "complete")[2];
+  assert.equal(completion.status, "needs_attention");
+  assert.match(completion.response, /Uno \(1\)/);
+});
+
+test("runWorkerOnce stays idle when the queue is empty", async () => {
+  const api = apiFixture(null);
+  const codex = { async listThreads() { return []; } };
+  const result = await runWorkerOnce({ api, codex, workerId: "mac" });
+  assert.deepEqual(result, { processed: false });
+});
+
