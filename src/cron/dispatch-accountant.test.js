@@ -21,6 +21,7 @@ test("monitor prompt owns the routine loop and stays quiet when healthy", () => 
   assert.match(prompt, /sin esperar que Matías/);
   assert.match(prompt, /DFE/);
   assert.match(prompt, /CCMA/);
+  assert.match(prompt, /npm run doctor/);
   assert.match(prompt, /DONT_NOTIFY/);
   assert.match(prompt, /monitoring-state\.json/);
 });
@@ -93,4 +94,3 @@ test("billing jobs always return the monthly approval package", async () => {
 test("buildAccountantPrompt rejects unknown cadence", () => {
   assert.throws(() => buildAccountantPrompt("daily"), /Unsupported cadence/);
 });
-

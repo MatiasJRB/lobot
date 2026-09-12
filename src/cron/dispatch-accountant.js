@@ -34,6 +34,7 @@ function commonPrompt(date) {
     `Operá como contador autónomo por excepción de Matías para el control correspondiente a ${date}.`,
     "Iniciá y completá todo el trabajo rutinario sin esperar que Matías pregunte ni conducirlo paso a paso.",
     "Trabajá desde /Users/matiasrios/Documents/GitHub/ops y aplicá el contrato de monotributo-copilot-ar.",
+    "Antes de un flujo fiscal conectado, ejecutá `npm run doctor` desde /Users/matiasrios/Documents/GitHub/monotributo-copilot-ar y no avances si reporta una configuración incompleta.",
     "Podés leer fuentes autorizadas, conciliar, actualizar artefactos locales, generar reportes, expedientes, borradores y dry-runs.",
     "Nunca interpretes una fuente ausente como cero: conservá unknown/incomplete, registrá frescura y reintentá en la próxima corrida cuando corresponda.",
     "No abras ARCA con Clave Fiscal de forma desatendida. No emitas comprobantes, no envíes mensajes a terceros, no generes ni pagues VEP, no reasignes saldos, no presentes recategorizaciones y no respondas DFE.",
@@ -133,4 +134,3 @@ if (import.meta.url === pathToFileURL(process.argv[1] || "").href) {
     process.exitCode = 1;
   });
 }
-
