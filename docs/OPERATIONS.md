@@ -61,6 +61,44 @@ a P0 y a Gmail/Calendar por default (`REACTIVE_ALERT_MIN_PRIORITY` /
 equivalente shell, pero `openclaw cron` suelto por ssh falla con
 `missing scope: operator`; usá el endpoint.
 
+## Revisiones del Sistema Operativo Personal
+
+El endpoint siguiente crea o actualiza dos command crons silenciosos:
+
+```text
+POST /setup/api/crons/install-personal-os
+```
+
+- Domingo 18:30 ART — revisión semanal.
+- Día 1 de cada mes, 18:30 ART — cierre mensual.
+
+Cada cron ejecuta `src/cron/dispatch-codex-review.js`, encola un job idempotente
+en el task exacto `Secretario personal` y fija como directorio de trabajo
+`/Users/matiasrios/Documents/Codex/personal-organization`. El worker Mac realiza
+la revisión, actualiza las fuentes locales y el puente entrega el resultado al
+WhatsApp propio de Matías. OpenClaw usa `--no-deliver` para no duplicar el
+mensaje ni involucrar a Gemini.
+
+La instalación habilita una automatización de mensajería personal. Antes de
+invocar el endpoint se debe aprobar el contrato de canal, audiencia, plantilla,
+variables y frecuencia. Una ejecución nunca autoriza mensajes a terceros,
+pagos, compras, reservas, contrataciones ni formularios.
+
+El endpoint exige este cuerpo para demostrar esa aprobación:
+
+```json
+{
+  "confirmMessagingContract": true,
+  "messagingContractVersion": "2026-09-12-v1"
+}
+```
+
+Prueba sin instalar el cron (encola una revisión real):
+
+```bash
+node src/cron/dispatch-codex-review.js --cadence weekly
+```
+
 ## Fuentes reales
 
 Estado de credenciales:

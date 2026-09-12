@@ -17,6 +17,12 @@ import {
   getPersonalSourceStatus,
   renderPersonalDigest,
 } from "./personal/digest.js";
+import {
+  PERSONAL_OS_CRON_JOBS,
+  personalOsCommandCreateArgs,
+  personalOsCommandEditArgs,
+} from "./personal-os/cron-schedule.js";
+import { createPersonalOsCronRouter } from "./personal-os/routes.js";
 
 const PORT = Number.parseInt(
   process.env.PORT ?? process.env.OPENCLAW_GATEWAY_PORT ?? "8080",
@@ -1418,6 +1424,76 @@ async function installReactiveAlertCron(opts = {}) {
   return { ok, output };
 }
 
+async function installPersonalOsCrons(opts = {}) {
+  const tz = (
+    opts.tz ||
+    envValue("PERSONAL_OS_CRON_TZ") ||
+    "America/Argentina/Buenos_Aires"
+  ).trim();
+  const timeoutSeconds = Number.parseInt(
+    opts.timeoutSeconds || envValue("PERSONAL_OS_CRON_TIMEOUT_SECONDS") || "60",
+    10,
+  );
+  const noOutputTimeoutSeconds = Number.parseInt(
+    opts.noOutputTimeoutSeconds ||
+      envValue("PERSONAL_OS_CRON_NO_OUTPUT_TIMEOUT_SECONDS") ||
+      "30",
+    10,
+  );
+  const outputMaxBytes = Number.parseInt(
+    opts.outputMaxBytes || envValue("PERSONAL_OS_CRON_OUTPUT_MAX_BYTES") || "4000",
+    10,
+  );
+
+  await ensureGatewayRunning();
+  const list = await runGatewayRpcWithAutoPairing(
+    "cron list",
+    ["cron", "list", "--json"],
+  );
+  let output = `[cron list] exit=${list.code}\n${list.output || ""}\n`;
+  let ok = list.code === 0;
+  let existingJobs = [];
+  try {
+    existingJobs = cronJobsFromListPayload(parseJsonFromCommandOutput(list.output));
+  } catch (err) {
+    output += `\n[cron list] could not parse JSON list output: ${err.message}\n`;
+  }
+
+  const commandOpts = {
+    tz,
+    cwd: process.cwd(),
+    nodePath: OPENCLAW_NODE,
+    timeoutSeconds: Number.isFinite(timeoutSeconds) ? timeoutSeconds : 60,
+    noOutputTimeoutSeconds: Number.isFinite(noOutputTimeoutSeconds)
+      ? noOutputTimeoutSeconds
+      : 30,
+    outputMaxBytes: Number.isFinite(outputMaxBytes) ? outputMaxBytes : 4000,
+  };
+
+  for (const job of PERSONAL_OS_CRON_JOBS) {
+    const existing = existingJobs.find(
+      (candidate) => cronJobName(candidate) === job.name,
+    );
+    const existingId = existing ? cronJobId(existing) : "";
+    const result = existingId
+      ? await runGatewayRpcWithAutoPairing(
+          `cron edit ${job.name}`,
+          personalOsCommandEditArgs(existingId, job, commandOpts),
+        )
+      : await runGatewayRpcWithAutoPairing(
+          `cron create ${job.name}`,
+          personalOsCommandCreateArgs(job, commandOpts),
+        );
+    const action = existingId ? "edit" : "create";
+    output +=
+      `\n[${action}] ${job.name} -> Codex ${job.cadence} (${job.schedule}, ${tz}) exit=${result.code}\n` +
+      `${result.output || ""}`;
+    ok = ok && result.code === 0;
+  }
+
+  return { ok, output };
+}
+
 const VALID_AUTH_CHOICES = [
   "openai-api-key",
   "apiKey",
@@ -1819,6 +1895,12 @@ app.post("/setup/api/crons/install-reactive", requireSetupAuth, async (req, res)
       .json({ ok: false, output: `Internal error: ${String(err)}` });
   }
 });
+
+app.use(
+  "/setup/api/crons",
+  requireSetupAuth,
+  createPersonalOsCronRouter({ installCrons: installPersonalOsCrons }),
+);
 
 app.post("/setup/api/discord/test", requireSetupAuth, async (req, res) => {
   try {

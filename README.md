@@ -16,6 +16,9 @@ Codex en la Mac.
   OpenClaw command cron jobs.
 - Incluye una cola durable en Railway y un worker saliente para consultar o
   disparar un hilo de Codex elegido desde WhatsApp.
+- Puede programar las revisiones semanal y mensual del Sistema Operativo
+  Personal en el task exacto `Secretario personal` y devolverlas al WhatsApp
+  propio mediante el puente, sin pasar por Gemini.
 
 ## Documentación del proyecto
 

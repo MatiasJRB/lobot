@@ -9,6 +9,7 @@
     "bridge:worker": "node src/bridge/worker.js",
     "bridge:worker:once": "node src/bridge/worker.js --once",
     "bridge:threads": "node src/cli/codex-bridge.js threads",
+    "personal-os:review": "node src/cron/dispatch-codex-review.js",
     "dev": "node src/server.js",
     "start": "node src/server.js",
     "lint": "node -c src/server.js",
