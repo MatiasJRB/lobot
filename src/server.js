@@ -18,6 +18,11 @@ import {
   renderPersonalDigest,
 } from "./personal/digest.js";
 import {
+  buildExactWhatsAppCommand,
+  normalizeExactWhatsAppRequest,
+  projectExactWhatsAppDelivery,
+} from "./personal/whatsapp.js";
+import {
   PERSONAL_OS_CRON_JOBS,
   personalOsCommandCreateArgs,
   personalOsCommandEditArgs,
@@ -548,6 +553,22 @@ async function deliverCodexBridgeJob(job) {
   if (result.code !== 0) {
     throw new Error(`OpenClaw WhatsApp delivery failed (exit=${result.code})`);
   }
+}
+
+async function deliverExactWhatsApp(request) {
+  await ensureGatewayRunning();
+  const result = await runCmd(
+    OPENCLAW_NODE,
+    clawArgs(buildExactWhatsAppCommand(request)),
+    {
+      timeout: (request.timeoutSeconds + 30) * 1000,
+      secrets: [request.target, request.message],
+    },
+  );
+  return {
+    code: result.code,
+    raw: parseJsonFromCommandOutput(result.output),
+  };
 }
 
 app.use(
@@ -1826,6 +1847,27 @@ app.get("/setup/api/personal/sources/status", requireSetupAuth, (_req, res) => {
     ok: true,
     sources: getPersonalSourceStatus(),
   });
+});
+
+app.post("/setup/api/whatsapp/send-exact", requireSetupAuth, async (req, res) => {
+  try {
+    const request = normalizeExactWhatsAppRequest(req.body || {});
+    const delivery = await deliverExactWhatsApp(request);
+    const response = projectExactWhatsAppDelivery(delivery, request);
+    return res.status(response.ok ? 200 : 502).json(response);
+  } catch (err) {
+    const message = String(err?.message || "");
+    if (
+      message === "target must be E.164" ||
+      message === "message is required" ||
+      message === "message is too long" ||
+      message.startsWith("timeoutSeconds must")
+    ) {
+      return res.status(400).json({ ok: false, error: message });
+    }
+    console.error("[/setup/api/whatsapp/send-exact] delivery failed");
+    return res.status(502).json({ ok: false, error: "delivery_failed" });
+  }
 });
 
 app.get("/setup/api/personal/digest", requireSetupAuth, async (req, res) => {
