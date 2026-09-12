@@ -27,3 +27,11 @@
   agregá `--mode workspace-write` sólo cuando Matías pida expresamente modificar
   archivos. El resultado vuelve automáticamente a su WhatsApp: no sostengas una
   espera larga dentro del turno de Gemini.
+- Contador autónomo: los cron instalados por
+  `POST /setup/api/crons/install-accountant` ejecutan
+  `node /app/src/cron/dispatch-accountant.js --cadence <monitor|billing|payment>`
+  y no dependen de mensajes inbound. Para una consulta manual de Matías, encolá
+  el pedido al task exacto `Investigar reemplazo del contador`; usá read-only
+  para consultar y `workspace-write` solo cuando el pedido requiera actualizar
+  artefactos locales. OpenClaw nunca emite, paga, reasigna, presenta ni responde
+  comunicaciones fiscales por sí mismo.

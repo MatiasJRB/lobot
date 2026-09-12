@@ -13,6 +13,12 @@ import { WebSocketServer } from "ws";
 import { createBridgeRouter } from "./bridge/routes.js";
 import { BridgeStore, resolveBridgeStatePath } from "./bridge/store.js";
 import {
+  ACCOUNTANT_CRON_JOBS,
+  accountantCommandCreateArgs,
+  accountantCommandEditArgs,
+} from "./accountant/cron-schedule.js";
+import { createAccountantCronRouter } from "./accountant/routes.js";
+import {
   collectPersonalDigest,
   getPersonalSourceStatus,
   renderPersonalDigest,
@@ -1515,6 +1521,76 @@ async function installPersonalOsCrons(opts = {}) {
   return { ok, output };
 }
 
+async function installAccountantCrons(opts = {}) {
+  const tz = (
+    opts.tz ||
+    envValue("ACCOUNTANT_CRON_TZ") ||
+    "America/Argentina/Buenos_Aires"
+  ).trim();
+  const timeoutSeconds = Number.parseInt(
+    opts.timeoutSeconds || envValue("ACCOUNTANT_CRON_TIMEOUT_SECONDS") || "60",
+    10,
+  );
+  const noOutputTimeoutSeconds = Number.parseInt(
+    opts.noOutputTimeoutSeconds ||
+      envValue("ACCOUNTANT_CRON_NO_OUTPUT_TIMEOUT_SECONDS") ||
+      "30",
+    10,
+  );
+  const outputMaxBytes = Number.parseInt(
+    opts.outputMaxBytes || envValue("ACCOUNTANT_CRON_OUTPUT_MAX_BYTES") || "4000",
+    10,
+  );
+
+  await ensureGatewayRunning();
+  const list = await runGatewayRpcWithAutoPairing(
+    "cron list",
+    ["cron", "list", "--json"],
+  );
+  let output = `[cron list] exit=${list.code}\n${list.output || ""}\n`;
+  let ok = list.code === 0;
+  let existingJobs = [];
+  try {
+    existingJobs = cronJobsFromListPayload(parseJsonFromCommandOutput(list.output));
+  } catch (err) {
+    output += `\n[cron list] could not parse JSON list output: ${err.message}\n`;
+  }
+
+  const commandOpts = {
+    tz,
+    cwd: process.cwd(),
+    nodePath: OPENCLAW_NODE,
+    timeoutSeconds: Number.isFinite(timeoutSeconds) ? timeoutSeconds : 60,
+    noOutputTimeoutSeconds: Number.isFinite(noOutputTimeoutSeconds)
+      ? noOutputTimeoutSeconds
+      : 30,
+    outputMaxBytes: Number.isFinite(outputMaxBytes) ? outputMaxBytes : 4000,
+  };
+
+  for (const job of ACCOUNTANT_CRON_JOBS) {
+    const existing = existingJobs.find(
+      (candidate) => cronJobName(candidate) === job.name,
+    );
+    const existingId = existing ? cronJobId(existing) : "";
+    const result = existingId
+      ? await runGatewayRpcWithAutoPairing(
+          `cron edit ${job.name}`,
+          accountantCommandEditArgs(existingId, job, commandOpts),
+        )
+      : await runGatewayRpcWithAutoPairing(
+          `cron create ${job.name}`,
+          accountantCommandCreateArgs(job, commandOpts),
+        );
+    const action = existingId ? "edit" : "create";
+    output +=
+      `\n[${action}] ${job.name} -> Codex ${job.cadence} (${job.schedule}, ${tz}) exit=${result.code}\n` +
+      `${result.output || ""}`;
+    ok = ok && result.code === 0;
+  }
+
+  return { ok, output };
+}
+
 const VALID_AUTH_CHOICES = [
   "openai-api-key",
   "apiKey",
@@ -1942,6 +2018,11 @@ app.use(
   "/setup/api/crons",
   requireSetupAuth,
   createPersonalOsCronRouter({ installCrons: installPersonalOsCrons }),
+);
+app.use(
+  "/setup/api/crons",
+  requireSetupAuth,
+  createAccountantCronRouter({ installCrons: installAccountantCrons }),
 );
 
 app.post("/setup/api/discord/test", requireSetupAuth, async (req, res) => {

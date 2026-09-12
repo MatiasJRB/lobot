@@ -64,6 +64,12 @@ export function validateJobInput(input) {
     if (input.reply.channel !== "whatsapp-self") {
       return "reply.channel must be whatsapp-self";
     }
+    if (
+      input.reply.policy !== undefined &&
+      !["always", "actionable-only"].includes(input.reply.policy)
+    ) {
+      return "reply.policy must be always or actionable-only";
+    }
   }
   return null;
 }

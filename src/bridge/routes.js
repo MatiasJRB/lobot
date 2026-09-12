@@ -65,7 +65,7 @@ export function createBridgeRouter({ store, token, deliverJob = null }) {
       let job = store.complete(req.params.jobId, req.body?.workerId, req.body || {});
       if (!job) return res.status(404).json({ ok: false, error: "Job not found" });
       const delivery = await attemptDelivery(job, store, deliverJob);
-      if (delivery.ok && delivery.attempted) job = store.getJob(job.id);
+      if (delivery.ok) job = store.getJob(job.id);
       return res.json({ ok: true, job, delivery });
     } catch (error) {
       const status = error instanceof TypeError ? 400 : 409;
@@ -107,6 +107,14 @@ async function attemptDelivery(job, store, deliverJob) {
   if (!job.reply || job.deliveredAt) {
     return { ok: true, attempted: false, reason: job.deliveredAt ? "already-delivered" : "not-requested" };
   }
+  if (
+    job.reply.policy === "actionable-only" &&
+    !job.error &&
+    job.response?.trim() === "DONT_NOTIFY"
+  ) {
+    store.markDelivered(job.id);
+    return { ok: true, attempted: false, reason: "suppressed-not-actionable" };
+  }
   if (!deliverJob) return { ok: false, attempted: false, error: "Delivery is not configured" };
   if (!job.response && !job.error) {
     return { ok: false, attempted: false, error: "Job has no result to deliver" };
@@ -119,4 +127,3 @@ async function attemptDelivery(job, store, deliverJob) {
     return { ok: false, attempted: true, error: error.message };
   }
 }
-

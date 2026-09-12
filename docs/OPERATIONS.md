@@ -104,6 +104,48 @@ Prueba sin instalar el cron (encola una revisión real):
 node src/cron/dispatch-codex-review.js --cadence weekly
 ```
 
+## Contador autónomo por excepción
+
+El endpoint siguiente instala o actualiza tres command crons silenciosos:
+
+```text
+POST /setup/api/crons/install-accountant
+```
+
+- Días hábiles 09:00 y 17:00 ART — monitoreo fiscal y DFE.
+- Día 1 a las 09:00 ART — conciliación y bandeja mensual de facturas.
+- Días 18, 21 y 23 a las 09:00 ART — vencimiento y aplicación del pago.
+
+Cada cron ejecuta `src/cron/dispatch-accountant.js`, encola un job idempotente
+en el task exacto `Investigar reemplazo del contador` y fija como directorio de
+trabajo `/Users/matiasrios/Documents/GitHub/ops`. OpenClaw no entrega el stdout
+del comando: la respuesta final vuelve exclusivamente por el bridge.
+
+Los jobs de monitoreo y pago usan `reply.policy=actionable-only`. Una respuesta
+final exacta `DONT_NOTIFY` queda registrada como entregada, pero no genera un
+WhatsApp. Facturación siempre devuelve una única bandeja mensual, aunque solo
+sea para confirmar que el período quedó conciliado.
+
+La instalación habilita una automatización de mensajería fiscal al WhatsApp
+propio. Antes de invocar el endpoint se debe aprobar el contrato completo de
+`docs/ACCOUNTANT_AUTOPILOT.md`. El endpoint exige:
+
+```json
+{
+  "confirmMessagingContract": true,
+  "messagingContractVersion": "2026-09-12-v1"
+}
+```
+
+Prueba de encolado sin instalar cron ni entregar el resultado:
+
+```bash
+node src/cron/dispatch-accountant.js --cadence monitor
+```
+
+No pausar las automatizaciones equivalentes de Codex hasta verificar un ciclo
+end-to-end OpenClaw → bridge → task fiscal → WhatsApp propio.
+
 ## Fuentes reales
 
 Estado de credenciales:

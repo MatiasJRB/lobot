@@ -19,6 +19,10 @@ Codex en la Mac.
 - Puede programar las revisiones semanal y mensual del Sistema Operativo
   Personal en el task exacto `Secretario personal` y devolverlas al WhatsApp
   propio mediante el puente, sin pasar por Gemini.
+- Puede operar el contador autónomo por excepción: OpenClaw dispara controles
+  fiscales, facturación y verificación de pagos en el task exacto de Codex; los
+  resultados sanos quedan silenciosos y solo las excepciones o aprobaciones
+  vuelven al WhatsApp propio.
 
 ## Documentación del proyecto
 
@@ -28,6 +32,7 @@ Codex en la Mac.
 - `docs/OPERATIONS.md` — operación diaria y cron.
 - `docs/SOURCES_AND_AUTOMATION_ROADMAP.md` — fuentes personales y roadmap.
 - `docs/CODEX_WHATSAPP_BRIDGE.md` — spec, arquitectura y operación del puente.
+- `docs/ACCOUNTANT_AUTOPILOT.md` — contrato del contador autónomo por excepción.
 
 ## Setup rápido
 

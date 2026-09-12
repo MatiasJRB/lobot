@@ -116,3 +116,76 @@ test("idempotency is preserved over HTTP", async (t) => {
   assert.equal((await first.json()).job.id, (await second.json()).job.id);
 });
 
+test("actionable-only delivery suppresses an exact DONT_NOTIFY response", async (t) => {
+  const delivered = [];
+  const f = await fixture({ deliverJob: async (job) => delivered.push(job.id) });
+  t.after(() => f.server.close());
+
+  const created = await (
+    await f.request("/jobs", {
+      method: "POST",
+      body: JSON.stringify({
+        prompt: "control fiscal",
+        thread: "Contador",
+        reply: { channel: "whatsapp-self", policy: "actionable-only" },
+      }),
+    })
+  ).json();
+  await f.request("/workers/heartbeat", {
+    method: "POST",
+    body: JSON.stringify({ workerId: "mac", threads: [] }),
+  });
+  await f.request("/jobs/claim", {
+    method: "POST",
+    body: JSON.stringify({ workerId: "mac" }),
+  });
+  const completed = await (
+    await f.request(`/jobs/${created.job.id}/complete`, {
+      method: "POST",
+      body: JSON.stringify({
+        workerId: "mac",
+        status: "done",
+        response: "DONT_NOTIFY",
+      }),
+    })
+  ).json();
+
+  assert.equal(completed.delivery.ok, true);
+  assert.equal(completed.delivery.attempted, false);
+  assert.equal(completed.delivery.reason, "suppressed-not-actionable");
+  assert.equal(completed.job.deliveredAt !== null, true);
+  assert.deepEqual(delivered, []);
+});
+
+test("actionable-only delivery still sends exceptions", async (t) => {
+  const delivered = [];
+  const f = await fixture({ deliverJob: async (job) => delivered.push(job.response) });
+  t.after(() => f.server.close());
+
+  const created = await (
+    await f.request("/jobs", {
+      method: "POST",
+      body: JSON.stringify({
+        prompt: "control fiscal",
+        reply: { channel: "whatsapp-self", policy: "actionable-only" },
+      }),
+    })
+  ).json();
+  await f.request("/jobs/claim", {
+    method: "POST",
+    body: JSON.stringify({ workerId: "mac" }),
+  });
+  const completed = await (
+    await f.request(`/jobs/${created.job.id}/complete`, {
+      method: "POST",
+      body: JSON.stringify({
+        workerId: "mac",
+        status: "done",
+        response: "Deuda nueva detectada",
+      }),
+    })
+  ).json();
+
+  assert.equal(completed.delivery.attempted, true);
+  assert.deepEqual(delivered, ["Deuda nueva detectada"]);
+});
