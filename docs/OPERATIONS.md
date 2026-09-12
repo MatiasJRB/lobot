@@ -79,6 +79,11 @@ la revisión, actualiza las fuentes locales y el puente entrega el resultado al
 WhatsApp propio de Matías. OpenClaw usa `--no-deliver` para no duplicar el
 mensaje ni involucrar a Gemini.
 
+Antes de redactar la salida, el job ejecuta `bin/personal-os brief`: horizonte
+de 168 horas para la revisión semanal y 744 horas para la mensual, con hasta
+cuatro decisiones independientes. Los bloqueados, diferidos y tombstones no
+entran en la bandeja.
+
 La instalación habilita una automatización de mensajería personal. Antes de
 invocar el endpoint se debe aprobar el contrato de canal, audiencia, plantilla,
 variables y frecuencia. Una ejecución nunca autoriza mensajes a terceros,

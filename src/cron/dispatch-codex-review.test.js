@@ -17,6 +17,7 @@ test("weekly prompt names deterministic sources, output and cadence", () => {
   const prompt = buildReviewPrompt("weekly", new Date("2026-09-13T21:30:00Z"));
   assert.match(prompt, /open-loops\.md/);
   assert.match(prompt, /reviews\/weekly-current\.md/);
+  assert.match(prompt, /personal-os brief --horizon-hours 168 --limit 4/);
   assert.match(prompt, /complete-cadence weekly_review/);
   assert.match(prompt, /no puede enviar mensajes a terceros/);
 });
@@ -24,6 +25,7 @@ test("weekly prompt names deterministic sources, output and cadence", () => {
 test("monthly prompt includes Norte Financiero as canonical source", () => {
   const prompt = buildReviewPrompt("monthly", new Date("2026-10-01T21:30:00Z"));
   assert.match(prompt, /gastos-automaticos/);
+  assert.match(prompt, /personal-os brief --horizon-hours 744 --limit 4/);
   assert.match(prompt, /complete-cadence monthly_review/);
 });
 

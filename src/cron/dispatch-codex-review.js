@@ -32,6 +32,7 @@ export function buildReviewPrompt(cadence, now = new Date()) {
   const date = localDateKey(now);
   const isWeekly = cadence === "weekly";
   const cadenceId = isWeekly ? "weekly_review" : "monthly_review";
+  const briefHorizonHours = isWeekly ? 168 : 744;
   const reviewFile = isWeekly
     ? "reviews/weekly-current.md"
     : "reviews/monthly-current.md";
@@ -43,7 +44,7 @@ export function buildReviewPrompt(cadence, now = new Date()) {
     `Ejecutá la ${isWeekly ? "revisión semanal" : "revisión mensual"} del Sistema Operativo Personal de Matías correspondiente a ${date}.`,
     "Esta activación puede leer fuentes y actualizar archivos locales, pero no puede enviar mensajes a terceros, pagar, comprar, reservar, contratar ni enviar formularios.",
     "Trabajá desde /Users/matiasrios/Documents/Codex/personal-organization.",
-    "1. Ejecutá `bin/personal-os validate` y después `bin/personal-os due`.",
+    `1. Ejecutá \`bin/personal-os validate\` y después \`bin/personal-os brief --horizon-hours ${briefHorizonHours} --limit 4\`. Usá la bandeja para empujar varios frentes seguros e independientes sin reintroducir bloqueados, diferidos ni cerrados.`,
     "2. Leé open-loops.md, monitoring-state.json, closed-items.json y daily-rhythm.md.",
     `3. ${extraSources}`,
     `4. Actualizá ${reviewFile} con una salida breve y concreta: cerrados, trabados, riesgos, decisiones pendientes y los próximos tres movimientos. No reabras tombstones ni agregues antecedentes como tareas.`,

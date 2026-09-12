@@ -41,6 +41,10 @@ pedido viene del chat personal, vuelve al WhatsApp de Matías.
 - Un selector ambiguo no elige silenciosamente un hilo.
 - `new` crea un hilo; el resto reanuda el hilo elegido.
 - El resultado final se extrae del `turn/completed` real y se publica en Railway.
+- Las revisiones periódicas consumen la bandeja ejecutiva determinista de
+  Personal OS: hasta cuatro decisiones próximas, además de controles autónomos
+  vencidos y cadencias. La semanal usa horizonte de siete días y la mensual de
+  treinta y un días.
 - La Mac sólo inicia conexiones salientes; no se expone Codex App Server a
   Internet.
 - El modo por defecto es `read-only`. `workspace-write` debe pedirse
@@ -90,4 +94,3 @@ pedido viene del chat personal, vuelve al WhatsApp de Matías.
    y resultado persistido.
 4. **Producción** — gate: Railway desplegado, LaunchAgent activo y prueba real
    WhatsApp → hilo elegido → WhatsApp recibida.
-
