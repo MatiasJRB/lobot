@@ -60,3 +60,31 @@ test("runner fails closed after an uncertain delivery", () => {
     /delivery_state_uncertain/,
   );
 });
+
+test("runner derives its private state directory from OPENCLAW_STATE_DIR", () => {
+  const previous = process.env.OPENCLAW_STATE_DIR;
+  const openClawStateDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-state-"));
+  const stateDir = path.join(openClawStateDir, "scheduled-whatsapp");
+  fs.mkdirSync(stateDir);
+  const jobFile = path.join(stateDir, "job.json");
+  fs.writeFileSync(jobFile, JSON.stringify({
+    status: "scheduled",
+    target: "+5492910000000",
+    message: "Texto exacto",
+    timeoutSeconds: 90,
+  }));
+  process.env.OPENCLAW_STATE_DIR = openClawStateDir;
+  try {
+    const result = runScheduledWhatsAppJob({
+      jobFile,
+      run: () => ({
+        status: 0,
+        stdout: JSON.stringify({ status: "ok", messageId: "wamid-state-root" }),
+      }),
+    });
+    assert.equal(result.messageId, "wamid-state-root");
+  } finally {
+    if (previous === undefined) delete process.env.OPENCLAW_STATE_DIR;
+    else process.env.OPENCLAW_STATE_DIR = previous;
+  }
+});

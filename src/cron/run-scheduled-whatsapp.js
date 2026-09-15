@@ -44,10 +44,12 @@ function assertPrivateJobPath(filePath, rootDir) {
 }
 
 export function runScheduledWhatsAppJob(options = {}) {
+  const openClawStateDir =
+    process.env.OPENCLAW_STATE_DIR?.trim() || "/data/.openclaw";
   const stateDir =
     options.stateDir ||
     process.env.SCHEDULED_WHATSAPP_STATE_DIR ||
-    "/data/scheduled-whatsapp";
+    path.join(openClawStateDir, "scheduled-whatsapp");
   const jobFile = assertPrivateJobPath(options.jobFile, stateDir);
   const record = JSON.parse(fs.readFileSync(jobFile, "utf8"));
 
