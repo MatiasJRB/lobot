@@ -29,6 +29,14 @@ import {
   projectExactWhatsAppDelivery,
 } from "./personal/whatsapp.js";
 import {
+  buildScheduledWhatsAppCronArgs,
+  cronJobIdFrom,
+  normalizeScheduledWhatsAppRequest,
+  projectScheduledWhatsApp,
+  scheduledWhatsAppDigest,
+  scheduledWhatsAppJobPath,
+} from "./personal/scheduled-whatsapp.js";
+import {
   PERSONAL_OS_CRON_JOBS,
   personalOsCommandCreateArgs,
   personalOsCommandEditArgs,
@@ -45,6 +53,9 @@ const STATE_DIR =
 const WORKSPACE_DIR =
   process.env.OPENCLAW_WORKSPACE_DIR?.trim() ||
   path.join(STATE_DIR, "workspace");
+const SCHEDULED_WHATSAPP_STATE_DIR =
+  process.env.SCHEDULED_WHATSAPP_STATE_DIR?.trim() ||
+  path.join(STATE_DIR, "scheduled-whatsapp");
 
 const SETUP_PASSWORD = process.env.SETUP_PASSWORD?.trim();
 const CODEX_BRIDGE_TOKEN = process.env.CODEX_BRIDGE_TOKEN?.trim() || "";
@@ -575,6 +586,98 @@ async function deliverExactWhatsApp(request) {
     code: result.code,
     raw: parseJsonFromCommandOutput(result.output),
   };
+}
+
+function writePrivateJson(filePath, value, opts = {}) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true, mode: 0o700 });
+  fs.chmodSync(path.dirname(filePath), 0o700);
+  const body = `${JSON.stringify(value)}\n`;
+  if (opts.exclusive) {
+    fs.writeFileSync(filePath, body, { encoding: "utf8", mode: 0o600, flag: "wx" });
+    return;
+  }
+  const temporaryPath = `${filePath}.${process.pid}.tmp`;
+  fs.writeFileSync(temporaryPath, body, { encoding: "utf8", mode: 0o600 });
+  fs.renameSync(temporaryPath, filePath);
+  fs.chmodSync(filePath, 0o600);
+}
+
+function readScheduledWhatsAppRecord(filePath) {
+  return JSON.parse(fs.readFileSync(filePath, "utf8"));
+}
+
+async function scheduleExactWhatsApp(raw) {
+  const request = normalizeScheduledWhatsAppRequest(raw);
+  const digest = scheduledWhatsAppDigest(request);
+  const jobFile = scheduledWhatsAppJobPath(
+    SCHEDULED_WHATSAPP_STATE_DIR,
+    request.idempotencyKey,
+  );
+  let record = {
+    version: 1,
+    idempotencyKey: request.idempotencyKey,
+    digest,
+    target: request.target,
+    message: request.message,
+    sendAt: request.sendAt,
+    timeoutSeconds: request.timeoutSeconds,
+    jobFile,
+    status: "preparing",
+    createdAt: new Date().toISOString(),
+  };
+  let created = false;
+  try {
+    writePrivateJson(jobFile, record, { exclusive: true });
+    created = true;
+  } catch (error) {
+    if (error.code !== "EEXIST") throw error;
+    record = readScheduledWhatsAppRecord(jobFile);
+    if (
+      record.idempotencyKey !== request.idempotencyKey ||
+      record.digest !== digest
+    ) {
+      const conflict = new Error("idempotency_key_reused");
+      conflict.statusCode = 409;
+      throw conflict;
+    }
+    if (["scheduled", "executing", "completed", "uncertain"].includes(record.status)) {
+      return projectScheduledWhatsApp(record, { duplicateSuppressed: true });
+    }
+  }
+
+  await ensureGatewayRunning();
+  const result = await runGatewayRpcWithAutoPairing(
+    "schedule exact whatsapp",
+    buildScheduledWhatsAppCronArgs(record, {
+      cwd: process.cwd(),
+      nodePath: OPENCLAW_NODE,
+    }),
+    { secrets: [request.target, request.message] },
+  );
+  const rawResult = parseJsonFromCommandOutput(result.output);
+  const cronJobId = cronJobIdFrom(rawResult);
+  if (result.code !== 0 || !cronJobId) {
+    record = {
+      ...record,
+      status: "schedule_failed",
+      scheduleFinishedAt: new Date().toISOString(),
+      error: "openclaw_schedule_failed",
+    };
+    writePrivateJson(jobFile, record);
+    const failure = new Error("openclaw_schedule_failed");
+    failure.statusCode = 502;
+    failure.created = created;
+    throw failure;
+  }
+
+  record = {
+    ...record,
+    status: "scheduled",
+    cronJobId: String(cronJobId),
+    scheduleFinishedAt: new Date().toISOString(),
+  };
+  writePrivateJson(jobFile, record);
+  return projectScheduledWhatsApp(record);
 }
 
 app.use(
@@ -1943,6 +2046,62 @@ app.post("/setup/api/whatsapp/send-exact", requireSetupAuth, async (req, res) =>
     }
     console.error("[/setup/api/whatsapp/send-exact] delivery failed");
     return res.status(502).json({ ok: false, error: "delivery_failed" });
+  }
+});
+
+app.post("/setup/api/whatsapp/schedule-exact", requireSetupAuth, async (req, res) => {
+  try {
+    const response = await scheduleExactWhatsApp(req.body || {});
+    return res.status(response.ok ? 200 : 202).json(response);
+  } catch (err) {
+    const message = String(err?.message || "");
+    const clientErrors = new Set([
+      "target must be E.164",
+      "message is required",
+      "message is too long",
+      "idempotencyKey is invalid",
+      "confirmExternal must be true",
+      "sendAt must be an ISO timestamp with an explicit timezone",
+      "sendAt must be a valid ISO timestamp",
+      "sendAt must be in the future",
+      "sendAt is too far in the future",
+    ]);
+    if (clientErrors.has(message) || message.startsWith("timeoutSeconds must")) {
+      return res.status(400).json({ ok: false, error: message });
+    }
+    if (message === "idempotency_key_reused") {
+      return res.status(409).json({ ok: false, error: message });
+    }
+    console.error("[/setup/api/whatsapp/schedule-exact] scheduling failed");
+    return res.status(err.statusCode || 502).json({
+      ok: false,
+      error: message === "openclaw_schedule_failed"
+        ? message
+        : "schedule_failed",
+    });
+  }
+});
+
+app.get("/setup/api/whatsapp/schedule-exact", requireSetupAuth, (req, res) => {
+  try {
+    const idempotencyKey = String(req.query.idempotencyKey || "").trim();
+    if (!idempotencyKey) {
+      return res.status(400).json({ ok: false, error: "idempotencyKey is required" });
+    }
+    const jobFile = scheduledWhatsAppJobPath(
+      SCHEDULED_WHATSAPP_STATE_DIR,
+      idempotencyKey,
+    );
+    if (!fs.existsSync(jobFile)) {
+      return res.status(404).json({ ok: false, error: "scheduled_job_not_found" });
+    }
+    const record = readScheduledWhatsAppRecord(jobFile);
+    if (record.idempotencyKey !== idempotencyKey) {
+      return res.status(404).json({ ok: false, error: "scheduled_job_not_found" });
+    }
+    return res.json(projectScheduledWhatsApp(record));
+  } catch {
+    return res.status(500).json({ ok: false, error: "scheduled_job_unreadable" });
   }
 });
 

@@ -104,4 +104,8 @@ test("registers the exact-send endpoint behind setup authentication", () => {
     source,
     /app\.post\("\/setup\/api\/whatsapp\/send-exact",\s*requireSetupAuth,/,
   );
+  assert.match(
+    source,
+    /app\.post\("\/setup\/api\/whatsapp\/schedule-exact",\s*requireSetupAuth,/,
+  );
 });
