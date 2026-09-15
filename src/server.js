@@ -30,6 +30,7 @@ import {
 } from "./personal/whatsapp.js";
 import {
   buildScheduledWhatsAppCronArgs,
+  buildScheduledWhatsAppFailureAlertArgs,
   cronJobIdFrom,
   normalizeScheduledWhatsAppRequest,
   projectScheduledWhatsApp,
@@ -665,6 +666,30 @@ async function scheduleExactWhatsApp(raw) {
     };
     writePrivateJson(jobFile, record);
     const failure = new Error("openclaw_schedule_failed");
+    failure.statusCode = 502;
+    failure.created = created;
+    throw failure;
+  }
+
+  const failureAlertTarget = process.env.WHATSAPP_PERSONAL_TARGET?.trim() || "";
+  const alertResult = await runGatewayRpcWithAutoPairing(
+    "configure scheduled whatsapp failure alert",
+    buildScheduledWhatsAppFailureAlertArgs(String(cronJobId), failureAlertTarget),
+    { secrets: [failureAlertTarget] },
+  );
+  if (alertResult.code !== 0) {
+    await runGatewayRpcWithAutoPairing(
+      "remove unmonitored scheduled whatsapp",
+      ["cron", "remove", String(cronJobId), "--json"],
+    );
+    record = {
+      ...record,
+      status: "schedule_failed",
+      scheduleFinishedAt: new Date().toISOString(),
+      error: "failure_alert_setup_failed",
+    };
+    writePrivateJson(jobFile, record);
+    const failure = new Error("failure_alert_setup_failed");
     failure.statusCode = 502;
     failure.created = created;
     throw failure;

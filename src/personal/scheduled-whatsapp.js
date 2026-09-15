@@ -100,6 +100,29 @@ export function buildScheduledWhatsAppCronArgs(record, opts = {}) {
   ];
 }
 
+export function buildScheduledWhatsAppFailureAlertArgs(jobId, target) {
+  const cleanJobId = typeof jobId === "string" ? jobId.trim() : "";
+  const cleanTarget = typeof target === "string" ? target.trim() : "";
+  if (!cleanJobId) throw new Error("cron job id is required");
+  if (!cleanTarget) throw new Error("failure alert target is required");
+  return [
+    "cron",
+    "edit",
+    cleanJobId,
+    "--failure-alert",
+    "--failure-alert-after",
+    "1",
+    "--failure-alert-cooldown",
+    "1h",
+    "--failure-alert-channel",
+    "whatsapp",
+    "--failure-alert-to",
+    cleanTarget,
+    "--failure-alert-exclude-skipped",
+    "--json",
+  ];
+}
+
 export function cronJobIdFrom(raw) {
   return (
     raw?.id ||

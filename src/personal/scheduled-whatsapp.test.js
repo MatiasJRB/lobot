@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   buildScheduledWhatsAppCronArgs,
+  buildScheduledWhatsAppFailureAlertArgs,
   normalizeScheduledWhatsAppRequest,
   projectScheduledWhatsApp,
   scheduledWhatsAppDigest,
@@ -93,4 +94,16 @@ test("status projection proves OpenClaw ownership without PII", () => {
     jobId: "job-123",
   });
   assert.doesNotMatch(JSON.stringify(projected), /2910000000|Texto exacto/);
+});
+
+test("failure alerts target the personal WhatsApp after the first execution error", () => {
+  assert.deepEqual(
+    buildScheduledWhatsAppFailureAlertArgs("job-123", "+5492910000000"),
+    [
+      "cron", "edit", "job-123", "--failure-alert",
+      "--failure-alert-after", "1", "--failure-alert-cooldown", "1h",
+      "--failure-alert-channel", "whatsapp", "--failure-alert-to",
+      "+5492910000000", "--failure-alert-exclude-skipped", "--json",
+    ],
+  );
 });
