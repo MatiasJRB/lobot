@@ -11,6 +11,7 @@ import {
 
 export const WORKER_VERSION = "0.1.0";
 const MAX_BUSY_ATTEMPTS = 12;
+const MAX_HEARTBEAT_PREVIEW_CHARS = 240;
 
 function activeWriterConflict(error) {
   return /already has an active writer/i.test(String(error?.message || ""));
@@ -28,7 +29,7 @@ export function summarizeThreads(threads) {
   return threads.map((thread) => ({
     id: thread.id,
     name: thread.name || null,
-    preview: thread.preview || "",
+    preview: String(thread.preview || "").slice(0, MAX_HEARTBEAT_PREVIEW_CHARS),
     cwd: thread.cwd || null,
     updatedAt: thread.updatedAt || null,
     status: thread.status || null,

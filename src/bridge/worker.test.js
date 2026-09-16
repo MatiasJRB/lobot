@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { ThreadSelectorError } from "./app-server-client.js";
-import { runWorkerOnce } from "./worker.js";
+import { runWorkerOnce, summarizeThreads } from "./worker.js";
 
 function apiFixture(job) {
   const calls = [];
@@ -26,6 +26,18 @@ function apiFixture(job) {
     },
   };
 }
+
+test("heartbeat inventory keeps previews bounded even for large Codex threads", () => {
+  const threads = Array.from({ length: 100 }, (_, index) => ({
+    id: `thread-${index}`,
+    name: `Task ${index}`,
+    preview: "x".repeat(120_000),
+  }));
+  const summarized = summarizeThreads(threads);
+  assert.equal(summarized.length, 100);
+  assert.equal(summarized[0].preview.length, 240);
+  assert.ok(Buffer.byteLength(JSON.stringify(summarized)) < 100_000);
+});
 
 test("runWorkerOnce publishes threads and completes a claimed job", async () => {
   const api = apiFixture({ id: "job-1", prompt: "hola" });
