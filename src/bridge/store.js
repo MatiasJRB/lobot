@@ -128,6 +128,8 @@ export class BridgeStore {
       updatedAt: timestamp,
       workerId: null,
       leaseExpiresAt: null,
+      availableAt: null,
+      attemptCount: 0,
       threadId: null,
       threadName: null,
       response: null,
@@ -156,18 +158,40 @@ export class BridgeStore {
     if (!workerId?.trim?.()) throw new TypeError("workerId is required");
     const now = this.clock();
     const candidate = this.state.jobs.find((job) => {
-      if (job.status === "queued") return true;
+      if (job.status === "queued") return !job.availableAt || Date.parse(job.availableAt) <= now;
       return job.status === "running" && Date.parse(job.leaseExpiresAt || "") <= now;
     });
     if (!candidate) return null;
 
     candidate.status = "running";
+    candidate.attemptCount = (candidate.attemptCount || 0) + 1;
+    candidate.availableAt = null;
     candidate.workerId = workerId.trim();
     candidate.updatedAt = nowIso(now);
     candidate.leaseExpiresAt = nowIso(now + leaseMs);
     candidate.error = null;
     this.#save();
     return clone(candidate);
+  }
+
+  defer(jobId, workerId, { delayMs, reason } = {}) {
+    const job = this.state.jobs.find((candidate) => candidate.id === jobId);
+    if (!job) return null;
+    if (job.workerId !== workerId || job.status !== "running") {
+      throw new Error("job is not leased by this worker");
+    }
+    if (!Number.isInteger(delayMs) || delayMs < 1_000 || delayMs > 60 * 60 * 1_000) {
+      throw new TypeError("delayMs must be between one second and one hour");
+    }
+    const now = this.clock();
+    job.status = "queued";
+    job.workerId = null;
+    job.leaseExpiresAt = null;
+    job.availableAt = nowIso(now + delayMs);
+    job.updatedAt = nowIso(now);
+    job.error = String(reason || "temporarily_busy").slice(0, 200);
+    this.#save();
+    return clone(job);
   }
 
   complete(jobId, workerId, result) {

@@ -73,6 +73,20 @@ export function createBridgeRouter({ store, token, deliverJob = null }) {
     }
   });
 
+  router.post("/jobs/:jobId/defer", (req, res) => {
+    try {
+      const job = store.defer(req.params.jobId, req.body?.workerId, {
+        delayMs: req.body?.delayMs,
+        reason: req.body?.reason,
+      });
+      if (!job) return res.status(404).json({ ok: false, error: "Job not found" });
+      return res.json({ ok: true, job });
+    } catch (error) {
+      const status = error instanceof TypeError ? 400 : 409;
+      return res.status(status).json({ ok: false, error: error.message });
+    }
+  });
+
   router.post("/jobs/:jobId/deliver", async (req, res) => {
     const job = store.getJob(req.params.jobId);
     if (!job) return res.status(404).json({ ok: false, error: "Job not found" });

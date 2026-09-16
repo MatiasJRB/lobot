@@ -116,6 +116,28 @@ test("idempotency is preserved over HTTP", async (t) => {
   assert.equal((await first.json()).job.id, (await second.json()).job.id);
 });
 
+test("defer endpoint keeps a busy job queued without attempting delivery", async (t) => {
+  const delivered = [];
+  const f = await fixture({ deliverJob: async (job) => delivered.push(job.id) });
+  t.after(() => f.server.close());
+  const created = await (await f.request("/jobs", {
+    method: "POST", body: JSON.stringify({ prompt: "revisión", reply: { channel: "whatsapp-self" } }),
+  })).json();
+  await f.request("/jobs/claim", { method: "POST", body: JSON.stringify({ workerId: "mac" }) });
+  const deferred = await (await f.request(`/jobs/${created.job.id}/defer`, {
+    method: "POST", body: JSON.stringify({
+      workerId: "mac", delayMs: 300_000, reason: "thread_active_writer",
+    }),
+  })).json();
+  assert.equal(deferred.job.status, "queued");
+  assert.equal(deferred.job.attemptCount, 1);
+  assert.equal(delivered.length, 0);
+  const unclaimable = await (await f.request("/jobs/claim", {
+    method: "POST", body: JSON.stringify({ workerId: "mac-2" }),
+  })).json();
+  assert.equal(unclaimable.job, null);
+});
+
 test("actionable-only delivery suppresses an exact DONT_NOTIFY response", async (t) => {
   const delivered = [];
   const f = await fixture({ deliverJob: async (job) => delivered.push(job.id) });

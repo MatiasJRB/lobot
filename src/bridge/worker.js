@@ -10,6 +10,15 @@ import {
 } from "./app-server-client.js";
 
 export const WORKER_VERSION = "0.1.0";
+const MAX_BUSY_ATTEMPTS = 12;
+
+function activeWriterConflict(error) {
+  return /already has an active writer/i.test(String(error?.message || ""));
+}
+
+function busyRetryDelayMs(attemptCount) {
+  return Math.min(5 * 60_000 * 2 ** Math.max(0, attemptCount - 1), 60 * 60_000);
+}
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -55,13 +64,23 @@ export async function runWorkerOnce({ api, codex, workerId, leaseMs = 35 * 60 * 
     });
     return { processed: true, job: completed.job, delivery: completed.delivery };
   } catch (error) {
+    if (activeWriterConflict(error) && (job.attemptCount || 1) < MAX_BUSY_ATTEMPTS) {
+      const deferred = await api.deferJob(job.id, {
+        workerId,
+        reason: "thread_active_writer",
+        delayMs: busyRetryDelayMs(job.attemptCount || 1),
+      });
+      return { processed: true, deferred: true, job: deferred.job };
+    }
     const selectionError = selectorFailure(error);
     const response = selectionError
       ? `No pude elegir el hilo. ${selectionError}`
+      : activeWriterConflict(error)
+        ? "El hilo siguió ocupado tras varios intentos; la revisión requiere atención."
       : null;
     const completed = await api.completeJob(job.id, {
       workerId,
-      status: selectionError ? "needs_attention" : "failed",
+      status: selectionError || activeWriterConflict(error) ? "needs_attention" : "failed",
       response,
       error: error.message,
     });

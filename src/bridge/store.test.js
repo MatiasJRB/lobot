@@ -72,6 +72,25 @@ test("claim leases one job and reclaims it only after expiry", () => {
   assert.equal(store.claim("mac-2", { leaseMs: 1_000 }).workerId, "mac-2");
 });
 
+test("deferred busy job waits, retains identity, and retries once eligible", () => {
+  const f = fixture();
+  const store = new BridgeStore(f.path, { clock: f.clock });
+  const { job } = store.enqueue({ prompt: "revisión", idempotencyKey: "weekly:2026-09-13" });
+  const first = store.claim("mac-1");
+  assert.equal(first.attemptCount, 1);
+  const deferred = store.defer(job.id, "mac-1", {
+    reason: "thread_active_writer", delayMs: 5 * 60_000,
+  });
+  assert.equal(deferred.status, "queued");
+  assert.equal(deferred.idempotencyKey, "weekly:2026-09-13");
+  assert.equal(store.claim("mac-2"), null);
+  f.advance(5 * 60_000);
+  const second = store.claim("mac-2");
+  assert.equal(second.id, job.id);
+  assert.equal(second.attemptCount, 2);
+  assert.throws(() => store.defer(job.id, "mac-1", { delayMs: 1_000 }), /leased/);
+});
+
 test("only the leasing worker can complete a job", () => {
   const f = fixture();
   const store = new BridgeStore(f.path, { clock: f.clock });
@@ -98,4 +117,3 @@ test("thread inventory ignores stale workers and sorts by recency", () => {
   f.advance(120_001);
   assert.deepEqual(store.listThreads(), []);
 });
-

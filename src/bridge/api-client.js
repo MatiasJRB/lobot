@@ -49,8 +49,14 @@ export class BridgeApiClient {
     });
   }
 
+  deferJob(jobId, result) {
+    return this.request(`/jobs/${encodeURIComponent(jobId)}/defer`, {
+      method: "POST",
+      body: result,
+    });
+  }
+
   heartbeat(input) {
     return this.request("/workers/heartbeat", { method: "POST", body: input });
   }
 }
-

@@ -20,6 +20,10 @@ function apiFixture(job) {
       calls.push(["complete", jobId, result]);
       return { job: { id: jobId, ...result }, delivery: { ok: true } };
     },
+    async deferJob(jobId, result) {
+      calls.push(["defer", jobId, result]);
+      return { job: { id: jobId, status: "queued", ...result } };
+    },
   };
 }
 
@@ -63,3 +67,27 @@ test("runWorkerOnce stays idle when the queue is empty", async () => {
   assert.deepEqual(result, { processed: false });
 });
 
+test("active writer defers a scheduled review without delivery or duplicate job", async () => {
+  const api = apiFixture({ id: "weekly-job", attemptCount: 1, prompt: "revisión" });
+  const codex = {
+    async listThreads() { return []; },
+    async runJob() { throw new Error("thread t-1 already has an active writer"); },
+  };
+  const result = await runWorkerOnce({ api, codex, workerId: "mac" });
+  assert.equal(result.deferred, true);
+  assert.equal(api.calls.find(([name]) => name === "defer")[2].delayMs, 5 * 60_000);
+  assert.equal(api.calls.some(([name]) => name === "complete"), false);
+});
+
+test("persistent active writer eventually needs attention, not an infinite retry", async () => {
+  const api = apiFixture({ id: "weekly-job", attemptCount: 12, prompt: "revisión" });
+  const codex = {
+    async listThreads() { return []; },
+    async runJob() { throw new Error("thread t-1 already has an active writer"); },
+  };
+  await runWorkerOnce({ api, codex, workerId: "mac" });
+  assert.equal(api.calls.some(([name]) => name === "defer"), false);
+  const completion = api.calls.find(([name]) => name === "complete")[2];
+  assert.equal(completion.status, "needs_attention");
+  assert.match(completion.response, /ocupado/);
+});
