@@ -19,3 +19,4 @@ src_ref
 .serena/
 .tmpdata/
 .codex-bridge-state.json
+tmp/

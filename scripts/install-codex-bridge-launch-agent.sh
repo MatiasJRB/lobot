@@ -2,7 +2,7 @@
 set -euo pipefail
 
 LABEL="com.geome7ric.secretario.codex-bridge"
-REPO_DIR="${SECRETARIO_PERSONAL_REPO:-/Users/matiasrios/Documents/GitHub/secretario-personal}"
+REPO_DIR="${SECRETARIO_PERSONAL_REPO:-/Users/matiasrios/Documents/Personal-GitHub/secretario-personal}"
 PLIST="${HOME}/Library/LaunchAgents/${LABEL}.plist"
 INSTALL_DIR="${HOME}/.local/lib/secretario-personal-codex-bridge"
 RUNNER="${INSTALL_DIR}/run-codex-bridge-worker.sh"

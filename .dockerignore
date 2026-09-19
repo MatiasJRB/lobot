@@ -9,3 +9,4 @@ node_modules
 *.zip
 personal-assistant-secrets
 ../personal-assistant-secrets
+tmp

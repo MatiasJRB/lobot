@@ -38,7 +38,7 @@ export function buildReviewPrompt(cadence, now = new Date()) {
     : "reviews/monthly-current.md";
   const extraSources = isWeekly
     ? "Revisá también health/registry.md, home/assets.md, relationships/people.md y documents/registry.md."
-    : "Revisá también health/registry.md, finance/monthly-close.md, home/assets.md, relationships/people.md, documents/registry.md y, sin duplicar movimientos, el estado canónico de /Users/matiasrios/Documents/GitHub/gastos-automaticos.";
+    : "Revisá también health/registry.md, finance/monthly-close.md, home/assets.md, relationships/people.md, documents/registry.md y, sin duplicar movimientos, el estado canónico de /Users/matiasrios/Documents/Personal-GitHub/gastos-automaticos.";
 
   return [
     `Ejecutá la ${isWeekly ? "revisión semanal" : "revisión mensual"} del Sistema Operativo Personal de Matías correspondiente a ${date}.`,

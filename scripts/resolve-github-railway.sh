@@ -21,7 +21,7 @@ REPO_NAME="${REPO_NAME:-secretario-personal}"
 REPO_FULL="${REPO_OWNER}/${REPO_NAME}"
 PROJECT_NAME="${RAILWAY_PROJECT_NAME:-secretario-personal}"
 SERVICE_NAME="${RAILWAY_SERVICE_NAME:-secretario-personal}"
-SECRET_FILE="${GEMINI_SECRET_FILE:-/Users/matiasrios/Documents/GitHub/personal-assistant-secrets/gemini-api-key-details.txt}"
+SECRET_FILE="${GEMINI_SECRET_FILE:-/Users/matiasrios/Documents/Personal-GitHub/personal-assistant-secrets/gemini-api-key-details.txt}"
 BUNDLED_NODE="${BUNDLED_NODE:-/Users/matiasrios/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node}"
 RAILWAY_JS="${RAILWAY_JS:-/Users/matiasrios/.nvm/versions/node/v20.19.4/lib/node_modules/@railway/cli/bin/railway.js}"
 
