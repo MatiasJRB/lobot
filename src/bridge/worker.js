@@ -8,6 +8,8 @@ import {
   CodexAppServerClient,
   ThreadSelectorError,
 } from "./app-server-client.js";
+import { pullPersonalOsEvents } from "./personal-os-events.js";
+import { pullPersonalOsNotices } from "./personal-os-notices.js";
 
 export const WORKER_VERSION = "0.1.0";
 const MAX_BUSY_ATTEMPTS = 12;
@@ -45,6 +47,21 @@ function selectorFailure(error) {
 }
 
 export async function runWorkerOnce({ api, codex, workerId, leaseMs = 35 * 60 * 1000 }) {
+  if (typeof api.listPersonalOsNotices === "function") {
+    try {
+      await pullPersonalOsNotices(api);
+    } catch (error) {
+      console.error(`[codex-bridge] Personal OS notice pull failed: ${error.message}`);
+    }
+  }
+  try {
+    const pulled = await pullPersonalOsEvents(api);
+    if (pulled.quarantined) {
+      console.error(`[codex-bridge] quarantined ${pulled.quarantined} invalid OpenClaw events`);
+    }
+  } catch (error) {
+    console.error(`[codex-bridge] Personal OS event pull failed: ${error.message}`);
+  }
   const threads = await codex.listThreads({ limit: 100 });
   await api.heartbeat({
     workerId,

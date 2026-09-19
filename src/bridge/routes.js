@@ -1,5 +1,7 @@
 import crypto from "node:crypto";
 import express from "express";
+import { DEFAULT_OPENCLAW_EVENT_OUTBOX, readOpenclawEventPage } from "../personal-os/openclaw-event-outbox.js";
+import { DEFAULT_NOTICE_OUTBOX, appendNotice, readNoticePage } from "./notice-outbox.js";
 
 function secureEqual(actual, expected) {
   const actualBuffer = Buffer.from(actual || "");
@@ -24,9 +26,47 @@ export function bearerAuth(token) {
   };
 }
 
-export function createBridgeRouter({ store, token, deliverJob = null }) {
+export function createBridgeRouter({ store, token, deliverJob = null,
+  openclawEventOutbox = DEFAULT_OPENCLAW_EVENT_OUTBOX,
+  noticeOutbox = DEFAULT_NOTICE_OUTBOX, noticeWriteToken = "" }) {
   const router = express.Router();
+  // Producer credential is write-only: it cannot inspect cards, events, jobs or threads.
+  router.post("/personal-os/notices", bearerAuth(noticeWriteToken), (req, res) => {
+    try {
+      const result = appendNotice(noticeOutbox, req.body);
+      res.set("Cache-Control", "no-store");
+      return res.status(result.created ? 202 : 200).json({ ok: true, id: result.notice.id,
+        created: result.created });
+    } catch (error) {
+      return res.status(error instanceof TypeError ? 400 : 503)
+        .json({ ok: false, error: error instanceof TypeError ? error.message : "Notice outbox unavailable" });
+    }
+  });
   router.use(bearerAuth(token));
+
+  router.get("/personal-os/notices", (req, res) => {
+    try {
+      const cursor = Number(req.query.cursor ?? 0);
+      const limit = Number(req.query.limit ?? 50);
+      res.set("Cache-Control", "no-store");
+      return res.json({ ok: true, ...readNoticePage(noticeOutbox, { cursor, limit }) });
+    } catch (error) {
+      return res.status(error instanceof TypeError ? 400 : 503)
+        .json({ ok: false, error: error instanceof TypeError ? error.message : "Notice outbox unavailable" });
+    }
+  });
+
+  router.get("/personal-os/events", (req, res) => {
+    try {
+      const cursor = Number(req.query.cursor ?? 0);
+      const limit = Number(req.query.limit ?? 50);
+      res.set("Cache-Control", "no-store");
+      return res.json({ ok: true, ...readOpenclawEventPage(openclawEventOutbox, { cursor, limit }) });
+    } catch (error) {
+      return res.status(error instanceof TypeError ? 400 : 503)
+        .json({ ok: false, error: error instanceof TypeError ? error.message : "Private event outbox unavailable" });
+    }
+  });
 
   router.post("/jobs", (req, res) => {
     try {

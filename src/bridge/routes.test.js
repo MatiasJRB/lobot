@@ -10,12 +10,13 @@ import express from "express";
 import { createBridgeRouter } from "./routes.js";
 import { BridgeStore } from "./store.js";
 
-async function fixture({ deliverJob } = {}) {
+async function fixture({ deliverJob, openclawEventOutbox, noticeOutbox } = {}) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "codex-bridge-routes-"));
   const store = new BridgeStore(path.join(directory, "state.json"));
   const app = express();
   app.use(express.json());
-  app.use("/bridge/api", createBridgeRouter({ store, token: "test-token", deliverJob }));
+  app.use("/bridge/api", createBridgeRouter({ store, token: "test-token", deliverJob,
+    openclawEventOutbox, noticeOutbox, noticeWriteToken: "notice-only" }));
   const server = http.createServer(app);
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address();
@@ -36,6 +37,30 @@ async function fixture({ deliverJob } = {}) {
   };
 }
 
+test("notices use a separate write-only token, durable feed and idempotency", async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "personal-os-notices-"));
+  const f = await fixture({ noticeOutbox: path.join(directory, "notices.ndjson") });
+  t.after(() => { f.server.close(); fs.rmSync(directory, { recursive: true, force: true }); });
+  const input = { source: "test-system", eventId: "event-1", title: "Revisar prueba",
+    summary: "Un sistema informa un cambio; sin acción automática.",
+    occurredAt: "2026-09-17T12:00:00Z" };
+  const post = (body, token = "notice-only") => fetch(`${f.url}/personal-os/notices`, {
+    method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  assert.equal((await post(input, "test-token")).status, 401);
+  assert.equal((await fetch(`${f.url}/jobs`, { headers: { authorization: "Bearer notice-only" } })).status, 401);
+  const first = await post(input);
+  assert.equal(first.status, 202);
+  assert.equal((await post(input)).status, 200);
+  assert.equal((await post({ ...input, title: "Otro" })).status, 400);
+  const page = await (await f.request("/personal-os/notices")).json();
+  assert.equal(page.notices.length, 1);
+  assert.equal(page.notices[0].source, "test-system");
+  assert.equal((await fetch(`${f.url}/personal-os/notices`,
+    { headers: { authorization: "Bearer notice-only" } })).status, 401);
+});
+
 test("bridge routes reject missing or invalid bearer tokens", async (t) => {
   const f = await fixture();
   t.after(() => f.server.close());
@@ -44,6 +69,23 @@ test("bridge routes reject missing or invalid bearer tokens", async (t) => {
     (await fetch(`${f.url}/threads`, { headers: { authorization: "Bearer wrong" } })).status,
     401,
   );
+});
+
+test("private OpenClaw event feed requires bearer and paginates by durable byte cursor", async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "personal-os-bridge-feed-"));
+  const filename = path.join(directory, "events.ndjson");
+  fs.writeFileSync(filename, '{"source_event_id":"one"}\n{"source_event_id":"two"}\n',
+    { mode: 0o600 });
+  const f = await fixture({ openclawEventOutbox: filename });
+  t.after(() => { f.server.close(); fs.rmSync(directory, { recursive: true, force: true }); });
+  assert.equal((await fetch(`${f.url}/personal-os/events`)).status, 401);
+  const first = await (await f.request("/personal-os/events?cursor=0&limit=1")).json();
+  assert.equal(first.events[0].source_event_id, "one");
+  assert.equal(first.hasMore, true);
+  const second = await (await f.request(`/personal-os/events?cursor=${first.nextCursor}`)).json();
+  assert.equal(second.events[0].source_event_id, "two");
+  assert.equal(second.hasMore, false);
+  assert.equal((await f.request("/personal-os/events?cursor=-1")).status, 400);
 });
 
 test("enqueue, heartbeat, claim and complete a job over HTTP", async (t) => {

@@ -60,6 +60,7 @@ const SCHEDULED_WHATSAPP_STATE_DIR =
 
 const SETUP_PASSWORD = process.env.SETUP_PASSWORD?.trim();
 const CODEX_BRIDGE_TOKEN = process.env.CODEX_BRIDGE_TOKEN?.trim() || "";
+const PERSONAL_OS_NOTICE_TOKEN = process.env.PERSONAL_OS_NOTICE_TOKEN?.trim() || "";
 const codexBridgeStore = new BridgeStore(resolveBridgeStatePath());
 
 function resolveGatewayToken() {
@@ -329,6 +330,27 @@ async function syncGatewayRuntimeConfig() {
     console.log("gateway", "synced gateway.auth.token SecretRef from OPENCLAW_GATEWAY_TOKEN");
   } else {
     console.warn("gateway", `failed to sync gateway.auth.token (exit=${tokenResult.code})`);
+  }
+
+  if (envValue("PERSONAL_OS_OPENCLAW_EVENTS_ENABLED").toLowerCase() === "true") {
+    const pluginFile = path.join(process.cwd(), "src/personal-os/openclaw-events-plugin/index.cjs");
+    if (!fs.existsSync(pluginFile)) throw new Error("Personal OS OpenClaw plugin is missing");
+    const current = JSON.parse(fs.readFileSync(configPath(), "utf8"));
+    const updates = [
+      ["plugins.allow", [...new Set([...(current.plugins?.allow || []), "personal-os-events"])]],
+      ["plugins.load.paths", [...new Set([...(current.plugins?.load?.paths || []), pluginFile])]],
+      ["plugins.entries.personal-os-events", {
+        enabled: true, hooks: { allowConversationAccess: true },
+      }],
+      ["channels.whatsapp.pluginHooks.messageReceived", true],
+    ];
+    for (const [key, value] of updates) {
+      const result = await runCmd(OPENCLAW_NODE, clawArgs([
+        "config", "set", "--json", key, JSON.stringify(value),
+      ]));
+      if (result.code !== 0) throw new Error(`Personal OS OpenClaw config failed at ${key}`);
+    }
+    console.log("[personal-os-events] OpenClaw WhatsApp hook and private plugin configured");
   }
 }
 
@@ -710,6 +732,7 @@ app.use(
   createBridgeRouter({
     store: codexBridgeStore,
     token: CODEX_BRIDGE_TOKEN,
+    noticeWriteToken: PERSONAL_OS_NOTICE_TOKEN,
     deliverJob: deliverCodexBridgeJob,
   }),
 );

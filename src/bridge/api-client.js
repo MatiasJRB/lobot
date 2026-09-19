@@ -7,7 +7,7 @@ export class BridgeApiClient {
     this.fetchImpl = fetchImpl;
   }
 
-  async request(pathname, { method = "GET", body } = {}) {
+  async request(pathname, { method = "GET", body, timeoutMs } = {}) {
     const response = await this.fetchImpl(`${this.baseUrl}${pathname}`, {
       method,
       headers: {
@@ -15,6 +15,7 @@ export class BridgeApiClient {
         ...(body === undefined ? {} : { "content-type": "application/json" }),
       },
       body: body === undefined ? undefined : JSON.stringify(body),
+      ...(timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
@@ -25,6 +26,16 @@ export class BridgeApiClient {
 
   listThreads() {
     return this.request("/threads");
+  }
+
+  listPersonalOsEvents(cursor, limit = 50) {
+    return this.request(`/personal-os/events?cursor=${cursor}&limit=${limit}`,
+      { timeoutMs: 10_000 });
+  }
+
+  listPersonalOsNotices(cursor, limit = 50) {
+    return this.request(`/personal-os/notices?cursor=${cursor}&limit=${limit}`,
+      { timeoutMs: 10_000 });
   }
 
   enqueueJob(input) {

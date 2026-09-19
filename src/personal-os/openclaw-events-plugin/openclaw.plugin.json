@@ -1,0 +1,6 @@
+{
+  "id": "personal-os-events",
+  "name": "Personal OS event outbox",
+  "description": "Private, read-only capture of attributed OpenClaw transport events for the local secretary",
+  "configSchema": {"type":"object","additionalProperties":false,"properties":{}}
+}
