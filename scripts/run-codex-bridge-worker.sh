@@ -1,7 +1,7 @@
 #!/bin/zsh
 set -euo pipefail
 
-REPO_DIR="${SECRETARIO_PERSONAL_REPO:-/Users/matiasrios/Documents/Personal-GitHub/secretario-personal}"
+REPO_DIR="${SECRETARIO_PERSONAL_REPO:-/Users/matiasrios/Documents/Personal-GitHub/lobot}"
 ENV_FILE="${CODEX_BRIDGE_ENV_FILE:-${HOME}/.config/secretario-personal/codex-bridge.env}"
 SCRIPT_DIR="${0:A:h}"
 
