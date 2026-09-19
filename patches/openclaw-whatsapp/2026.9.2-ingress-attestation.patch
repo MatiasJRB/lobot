@@ -1,0 +1,1076 @@
+diff --git a/extensions/whatsapp/src/auto-reply/monitor/on-message.ts b/extensions/whatsapp/src/auto-reply/monitor/on-message.ts
+index 67b45db16b..398617f211 100644
+--- a/extensions/whatsapp/src/auto-reply/monitor/on-message.ts
++++ b/extensions/whatsapp/src/auto-reply/monitor/on-message.ts
+@@ -13,6 +13,7 @@ import { resolveWhatsAppAccount } from "../../accounts.js";
+ import { resolveWhatsAppGroupSessionRoute } from "../../group-session-key.js";
+ import { getPrimaryIdentityId, getSenderIdentity } from "../../identity.js";
+ import { requireWhatsAppInboundAdmission } from "../../inbound/admission.js";
++import { copyWhatsAppIngressRawFacts } from "../../inbound/ingress-attestation.js";
+ import type { AdmittedWebInboundMessage } from "../../inbound/types.js";
+ import { normalizeE164 } from "../../text-runtime.js";
+ import { buildMentionConfig } from "../mentions.js";
+@@ -66,14 +67,14 @@ export function createWebOnMessageHandler(params: {
+     if (!normalized) {
+       return msg;
+     }
+-    return {
++    return copyWhatsAppIngressRawFacts(msg, {
+       ...msg,
+       platform: {
+         ...msg.platform,
+         sender: { ...msg.platform.sender, e164: normalized },
+         senderE164: normalized,
+       },
+-    };
++    });
+   };
+ 
+   const processForRoute = async (
+diff --git a/extensions/whatsapp/src/auto-reply/monitor/process-message.ts b/extensions/whatsapp/src/auto-reply/monitor/process-message.ts
+index 8bfdf0e301..d69bf66195 100644
+--- a/extensions/whatsapp/src/auto-reply/monitor/process-message.ts
++++ b/extensions/whatsapp/src/auto-reply/monitor/process-message.ts
+@@ -30,6 +30,7 @@ import {
+ } from "../../inbound-policy.js";
+ import { requireWhatsAppInboundAdmission } from "../../inbound/admission.js";
+ import { resolveWhatsAppIngressLifecycle } from "../../inbound/ingress-lifecycle.js";
++import { attestWhatsAppInboundBeforeHooks } from "../../inbound/ingress-attestation.js";
+ import type { AdmittedWebInboundMessage } from "../../inbound/types.js";
+ import { newConnectionId } from "../../reconnect.js";
+ import { formatError } from "../../session.js";
+@@ -508,6 +509,12 @@ export async function processMessage(params: {
+   const turnAdoptionLifecycle = ingressLifecycle
+     ? bindIngressLifecycleToReplyOptions(ingressLifecycle).turnAdoptionLifecycle
+     : undefined;
++  await attestWhatsAppInboundBeforeHooks({
++    message: params.msg,
++    canonical: deriveInboundMessageHookContext(ctxPayload),
++    conversationKind: admission.conversation.kind,
++    fromMe: params.msg.platform.fromMe === true,
++  });
+   emitWhatsAppMessageReceivedHooksIfEnabled({
+     cfg: params.cfg,
+     ctx: ctxPayload,
+diff --git a/extensions/whatsapp/src/inbound/message-debounce.ts b/extensions/whatsapp/src/inbound/message-debounce.ts
+index 64ee223941..cfb27b62e4 100644
+--- a/extensions/whatsapp/src/inbound/message-debounce.ts
++++ b/extensions/whatsapp/src/inbound/message-debounce.ts
+@@ -3,6 +3,7 @@ import { fanInChannelIngressLifecycles } from "openclaw/plugin-sdk/channel-ingre
+ import { getPrimaryIdentityId } from "../identity.js";
+ import { requireWhatsAppInboundAdmission } from "./admission.js";
+ import type { WhatsAppIngressLifecycle, WhatsAppReadReceiptTarget } from "./durable-receive.js";
++import { copyWhatsAppIngressRawFacts } from "./ingress-attestation.js";
+ import { attachWhatsAppIngressLifecycle } from "./ingress-lifecycle.js";
+ import type { AdmittedWebInboundCallbackMessage } from "./types.js";
+ 
+@@ -157,6 +158,7 @@ export function createWhatsAppInboundMessageDebouncer(options: {
+   const enqueue = async (input: WhatsAppQueuedInboundMessage) => {
+     // Use one timing fact for both queue admission and shutdown tracking.
+     const message = { ...input, debounceMs: options.resolveDebounceMs() };
++    copyWhatsAppIngressRawFacts(input, message);
+     const key = buildKey(message);
+     if (key) {
+       message.debounceKey = key;
+diff --git a/extensions/whatsapp/src/inbound/message-delivery.ts b/extensions/whatsapp/src/inbound/message-delivery.ts
+index bd8faaa2b3..d951cdce62 100644
+--- a/extensions/whatsapp/src/inbound/message-delivery.ts
++++ b/extensions/whatsapp/src/inbound/message-delivery.ts
+@@ -23,6 +23,10 @@ import {
+   type WhatsAppReadReceiptTarget,
+ } from "./durable-receive.js";
+ import type { WhatsAppGroupMetadataCacheOwner } from "./group-metadata-cache.js";
++import {
++  attachWhatsAppIngressRawFacts,
++  captureWhatsAppIngressRawFacts,
++} from "./ingress-attestation.js";
+ import {
+   createWhatsAppInboundMessageDebouncer,
+   type WhatsAppQueuedInboundMessage,
+@@ -387,6 +391,7 @@ export function createWhatsAppMessageDeliveryCoordinator(options: WhatsAppMessag
+       readReceipt: durable.readReceipt,
+       receiveOrder: durable.receiveOrder,
+     };
++    attachWhatsAppIngressRawFacts(inboundMessage, captureWhatsAppIngressRawFacts(msg.message));
+     if (inboundMessage.event.id) {
+       const admission = requireWhatsAppInboundAdmission(inboundMessage);
+       cacheInboundMessageMeta(
+diff --git a/extensions/whatsapp/src/inbound/ingress-attestation.test.ts b/extensions/whatsapp/src/inbound/ingress-attestation.test.ts
+new file mode 100644
+index 0000000000..f4e9b2f642
+--- /dev/null
++++ b/extensions/whatsapp/src/inbound/ingress-attestation.test.ts
+@@ -0,0 +1,388 @@
++import { createHash, createHmac } from "node:crypto";
++import { mkdtemp, rm } from "node:fs/promises";
++import net from "node:net";
++import os from "node:os";
++import path from "node:path";
++import type { proto } from "baileys";
++import { afterEach, describe, expect, it } from "vitest";
++import {
++  attachWhatsAppIngressRawFacts,
++  attestWhatsAppInboundBeforeHooks,
++  buildWhatsAppIngressEnvelope,
++  canonicalWhatsAppIngressEnvelope,
++  captureWhatsAppIngressRawFacts,
++  copyWhatsAppIngressRawFacts,
++  deliverWhatsAppIngressAttestation,
++  resolveWhatsAppIngressRawFacts,
++  signWhatsAppIngressEnvelope,
++  whatsappIngressAttestationId,
++  type WhatsAppIngressCanonicalContext,
++  type WhatsAppIngressEnvelope,
++} from "./ingress-attestation.js";
++
++const temporaryDirectories: string[] = [];
++
++afterEach(async () => {
++  await Promise.all(
++    temporaryDirectories
++      .splice(0)
++      .map((directory) => rm(directory, { force: true, recursive: true })),
++  );
++});
++
++function canonical(
++  overrides: Partial<WhatsAppIngressCanonicalContext> = {},
++): WhatsAppIngressCanonicalContext {
++  return {
++    channelId: "whatsapp",
++    accountId: "personal",
++    conversationId: "chat-1",
++    senderId: "sender-1",
++    messageId: "message-1",
++    sessionKey: "agent:main:whatsapp:direct:chat-1",
++    content: " CONFIRMAR P-7 \n",
++    timestamp: 1_788_000_000_000,
++    isGroup: false,
++    ...overrides,
++  };
++}
++
++function directEnvelope(overrides: Partial<WhatsAppIngressEnvelope> = {}): WhatsAppIngressEnvelope {
++  const envelope = buildWhatsAppIngressEnvelope({
++    canonical: canonical(),
++    rawFacts: { modality: "text", origin: "direct", forwardingScore: 0 },
++    fromMe: false,
++  });
++  if (!envelope) {
++    throw new Error("fixture envelope was rejected");
++  }
++  return { ...envelope, ...overrides };
++}
++
++async function createSocketServer(
++  responder: (line: string) => string | undefined,
++): Promise<{ socketPath: string; close: () => Promise<void> }> {
++  const directory = await mkdtemp(path.join(os.tmpdir(), "openclaw-ingress-test-"));
++  temporaryDirectories.push(directory);
++  const socketPath = path.join(directory, "ingress.sock");
++  const server = net.createServer((socket) => {
++    let input = "";
++    socket.setEncoding("utf8");
++    socket.on("data", (chunk) => {
++      input += chunk;
++    });
++    socket.on("end", () => {
++      const response = responder(input);
++      if (response !== undefined) {
++        socket.end(response);
++      }
++    });
++  });
++  await new Promise<void>((resolve, reject) => {
++    server.once("error", reject);
++    server.listen(socketPath, resolve);
++  });
++  return {
++    socketPath,
++    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
++  };
++}
++
++describe("raw WhatsApp ingress facts", () => {
++  it("classifies recognized direct text and ignores forwarding metadata in the quote", () => {
++    const message = {
++      extendedTextMessage: {
++        text: "CONFIRMAR P-7",
++        contextInfo: {
++          quotedMessage: {
++            extendedTextMessage: {
++              text: "forwarded quote",
++              contextInfo: { isForwarded: true, forwardingScore: 8 },
++            },
++          },
++        },
++      },
++    } as proto.IMessage;
++
++    expect(captureWhatsAppIngressRawFacts(message)).toEqual({
++      modality: "text",
++      origin: "direct",
++      forwardingScore: 0,
++    });
++  });
++
++  it.each([
++    [{ extendedTextMessage: { text: "x", contextInfo: { isForwarded: true } } }, 0],
++    [{ extendedTextMessage: { text: "x", contextInfo: { forwardingScore: 3 } } }, 3],
++  ])("classifies explicit forwarding", (message, forwardingScore) => {
++    expect(captureWhatsAppIngressRawFacts(message as proto.IMessage)).toEqual({
++      modality: "text",
++      origin: "forwarded",
++      forwardingScore,
++    });
++  });
++
++  it("preserves audio modality through a supported wrapper", () => {
++    const message = {
++      ephemeralMessage: {
++        message: { audioMessage: { mimetype: "audio/ogg; codecs=opus" } },
++      },
++    } as proto.IMessage;
++    expect(captureWhatsAppIngressRawFacts(message)).toMatchObject({
++      modality: "audio",
++      origin: "direct",
++    });
++  });
++
++  it("fails closed on an unknown current-message form", () => {
++    const message = { protocolMessage: { type: 0 } } as proto.IMessage;
++    expect(captureWhatsAppIngressRawFacts(message)).toEqual({
++      modality: "unknown",
++      origin: "unknown",
++      forwardingScore: 0,
++    });
++  });
++
++  it.each([
++    {
++      label: "button response selectedButtonId",
++      message: { buttonsResponseMessage: { selectedButtonId: "CONFIRMAR NF-123" } },
++    },
++    {
++      label: "list response selectedRowId",
++      message: {
++        listResponseMessage: { singleSelectReply: { selectedRowId: "CONFIRMAR NF-123" } },
++      },
++    },
++    {
++      label: "template response selectedId",
++      message: { templateButtonReplyMessage: { selectedId: "CONFIRMAR NF-123" } },
++    },
++    {
++      label: "interactive native-flow params.id fallback",
++      message: {
++        interactiveResponseMessage: {
++          nativeFlowResponseMessage: { paramsJson: '{"id":"CONFIRMAR NF-123"}' },
++        },
++      },
++    },
++  ])("does not authorize $label as written text", ({ message }) => {
++    expect(captureWhatsAppIngressRawFacts(message as proto.IMessage)).toEqual({
++      modality: "unknown",
++      origin: "unknown",
++      forwardingScore: 0,
++    });
++  });
++
++  it("keeps facts non-enumerable and copies them only through the trusted helper", () => {
++    const source = attachWhatsAppIngressRawFacts(
++      { payload: "visible" },
++      { modality: "text", origin: "direct", forwardingScore: 0 },
++    );
++    expect(Object.keys(source)).toEqual(["payload"]);
++    expect(JSON.stringify(source)).toBe('{"payload":"visible"}');
++    expect(resolveWhatsAppIngressRawFacts({ ...source })).toBeUndefined();
++    const target = copyWhatsAppIngressRawFacts(source, { cloned: true });
++    expect(resolveWhatsAppIngressRawFacts(target)).toEqual({
++      modality: "text",
++      origin: "direct",
++      forwardingScore: 0,
++    });
++  });
++});
++
++describe("canonical envelope", () => {
++  it("uses exact canonical identity/content bytes and binary key ordering", () => {
++    const context = canonical({ replyToId: "short", replyToIdFull: "full" });
++    const envelope = buildWhatsAppIngressEnvelope({
++      canonical: context,
++      rawFacts: { modality: "text", origin: "direct", forwardingScore: 0 },
++      fromMe: false,
++    });
++    expect(envelope).not.toBeNull();
++    expect(envelope?.reply_to_id).toBe("full");
++    expect(envelope?.content_sha256).toBe(
++      createHash("sha256").update(context.content, "utf8").digest("hex"),
++    );
++    expect(envelope?.attestation_id).toBe(
++      whatsappIngressAttestationId("personal", "chat-1", "message-1"),
++    );
++    const canonicalJson = canonicalWhatsAppIngressEnvelope(envelope as WhatsAppIngressEnvelope);
++    expect(Object.keys(JSON.parse(canonicalJson))).toEqual(
++      Object.keys(JSON.parse(canonicalJson)).toSorted(),
++    );
++    const key = Buffer.from("12345678901234567890123456789012", "utf8");
++    expect(signWhatsAppIngressEnvelope(envelope as WhatsAppIngressEnvelope, key)).toBe(
++      `v1=${createHmac("sha256", key).update(canonicalJson, "utf8").digest("hex")}`,
++    );
++  });
++
++  it.each([
++    { accountId: undefined },
++    { content: undefined as unknown as string },
++    { timestamp: 1.5 },
++    { messageId: "bad\nmessage" },
++    { channelId: "telegram" },
++  ])("rejects invalid canonical context %#", (overrides) => {
++    expect(
++      buildWhatsAppIngressEnvelope({
++        canonical: canonical(overrides),
++        rawFacts: { modality: "text", origin: "direct", forwardingScore: 0 },
++        fromMe: false,
++      }),
++    ).toBeNull();
++  });
++});
++
++describe("private Unix delivery", () => {
++  it("accepts only the exact durable ACK", async () => {
++    const envelope = directEnvelope();
++    const server = await createSocketServer((line) => {
++      const wire = JSON.parse(line.trim()) as { envelope: WhatsAppIngressEnvelope };
++      return `ACK ${wire.envelope.attestation_id}\n`;
++    });
++    await expect(
++      deliverWhatsAppIngressAttestation({
++        socketPath: server.socketPath,
++        envelope,
++        signature: `v1=${"a".repeat(64)}`,
++      }),
++    ).resolves.toBe("acknowledged");
++    await server.close();
++  });
++
++  it("distinguishes explicit rejection or absence from uncertain delivery", async () => {
++    const envelope = directEnvelope();
++    const nack = await createSocketServer(() => "NACK INVALID\n");
++    await expect(
++      deliverWhatsAppIngressAttestation({
++        socketPath: nack.socketPath,
++        envelope,
++        signature: `v1=${"a".repeat(64)}`,
++      }),
++    ).resolves.toBe("rejected");
++    await nack.close();
++
++    await expect(
++      deliverWhatsAppIngressAttestation({
++        socketPath: "/tmp/openclaw-ingress-definitely-absent.sock",
++        envelope,
++        signature: `v1=${"a".repeat(64)}`,
++      }),
++    ).resolves.toBe("unavailable");
++
++    const badAck = await createSocketServer(() => "ACK wrong\n");
++    await expect(
++      deliverWhatsAppIngressAttestation({
++        socketPath: badAck.socketPath,
++        envelope: directEnvelope(),
++        signature: `v1=${"a".repeat(64)}`,
++      }),
++    ).resolves.toBe("uncertain");
++    await badAck.close();
++
++    const trailingAck = await createSocketServer(
++      () => `ACK ${directEnvelope().attestation_id}\ntrailing`,
++    );
++    await expect(
++      deliverWhatsAppIngressAttestation({
++        socketPath: trailingAck.socketPath,
++        envelope: directEnvelope(),
++        signature: `v1=${"a".repeat(64)}`,
++      }),
++    ).resolves.toBe("uncertain");
++    await trailingAck.close();
++
++    const timeout = await createSocketServer(() => undefined);
++    await expect(
++      deliverWhatsAppIngressAttestation({
++        socketPath: timeout.socketPath,
++        envelope: directEnvelope(),
++        signature: `v1=${"a".repeat(64)}`,
++        timeoutMs: 20,
++      }),
++    ).resolves.toBe("uncertain");
++    await timeout.close();
++
++    await expect(
++      deliverWhatsAppIngressAttestation({
++        socketPath: "/tmp/not-opened.sock",
++        envelope: directEnvelope({ sender_id: "x".repeat(9_000) }),
++        signature: `v1=${"a".repeat(64)}`,
++      }),
++    ).resolves.toBe("rejected");
++  });
++});
++
++describe("emitter gate", () => {
++  const key = "12345678901234567890123456789012";
++  const baseEnv = (socketPath: string): NodeJS.ProcessEnv => ({
++    NORTE_WHATSAPP_INGRESS_ATTESTATION_ENABLED: "true",
++    NORTE_WHATSAPP_INGRESS_ATTESTATION_SOCKET: socketPath,
++    NORTE_WHATSAPP_INGRESS_ATTESTATION_HMAC_KEY_ENV: "TEST_INGRESS_KEY",
++    NORTE_WHATSAPP_INGRESS_ATTESTATION_ALLOWED_ROUTES_JSON: JSON.stringify([
++      { accountId: "personal", conversationId: "chat-1", senderId: "sender-1" },
++    ]),
++    TEST_INGRESS_KEY: key,
++  });
++
++  it("is disabled by default and fails closed for invalid config/scope", async () => {
++    const message = attachWhatsAppIngressRawFacts(
++      {},
++      { modality: "text", origin: "direct", forwardingScore: 0 },
++    );
++    await expect(
++      attestWhatsAppInboundBeforeHooks({
++        message,
++        canonical: canonical(),
++        conversationKind: "direct",
++        fromMe: false,
++        env: {},
++      }),
++    ).resolves.toBe("disabled");
++    await expect(
++      attestWhatsAppInboundBeforeHooks({
++        message,
++        canonical: canonical(),
++        conversationKind: "direct",
++        fromMe: false,
++        env: { NORTE_WHATSAPP_INGRESS_ATTESTATION_ENABLED: "true" },
++      }),
++    ).resolves.toBe("configuration-invalid");
++    await expect(
++      attestWhatsAppInboundBeforeHooks({
++        message,
++        canonical: canonical({ senderId: "other" }),
++        conversationKind: "direct",
++        fromMe: false,
++        env: baseEnv("/tmp/not-opened.sock"),
++      }),
++    ).resolves.toBe("scope-denied");
++  });
++
++  it("signs and receives an ACK only for an allowed canonical route", async () => {
++    const server = await createSocketServer((line) => {
++      const wire = JSON.parse(line.trim()) as {
++        envelope: WhatsAppIngressEnvelope;
++        signature: string;
++      };
++      const expected = signWhatsAppIngressEnvelope(wire.envelope, Buffer.from(key, "utf8"));
++      expect(wire.signature).toBe(expected);
++      return `ACK ${wire.envelope.attestation_id}\n`;
++    });
++    const message = attachWhatsAppIngressRawFacts(
++      {},
++      { modality: "text", origin: "direct", forwardingScore: 0 },
++    );
++    await expect(
++      attestWhatsAppInboundBeforeHooks({
++        message,
++        canonical: canonical(),
++        conversationKind: "direct",
++        fromMe: false,
++        env: baseEnv(server.socketPath),
++      }),
++    ).resolves.toBe("delivered");
++    await server.close();
++  });
++});
+diff --git a/extensions/whatsapp/src/inbound/ingress-attestation.ts b/extensions/whatsapp/src/inbound/ingress-attestation.ts
+new file mode 100644
+index 0000000000..48f625db66
+--- /dev/null
++++ b/extensions/whatsapp/src/inbound/ingress-attestation.ts
+@@ -0,0 +1,579 @@
++import { createHash, createHmac } from "node:crypto";
++import net from "node:net";
++import path from "node:path";
++import { getContentType, normalizeMessageContent, type proto } from "baileys";
++
++const ENABLED_ENV = "NORTE_WHATSAPP_INGRESS_ATTESTATION_ENABLED";
++const SOCKET_ENV = "NORTE_WHATSAPP_INGRESS_ATTESTATION_SOCKET";
++const KEY_NAME_ENV = "NORTE_WHATSAPP_INGRESS_ATTESTATION_HMAC_KEY_ENV";
++const ROUTES_ENV = "NORTE_WHATSAPP_INGRESS_ATTESTATION_ALLOWED_ROUTES_JSON";
++const CONTENT_NORMALIZATION = "whatsapp.hookContext.content.utf8.v1";
++const SCHEMA_VERSION = "norte.whatsapp-ingress.v1";
++const DEFAULT_TIMEOUT_MS = 1_500;
++const MAX_LINE_BYTES = 8_192;
++const MAX_ACK_BYTES = 256;
++const ID_PATTERN = /^[^\x00-\x1f\x7f]{1,512}$/;
++const ENV_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
++
++export type WhatsAppIngressModality =
++  | "text"
++  | "audio"
++  | "image"
++  | "video"
++  | "document"
++  | "sticker"
++  | "contact"
++  | "location"
++  | "unknown";
++
++export type WhatsAppIngressOrigin = "direct" | "forwarded" | "unknown";
++
++export type WhatsAppIngressRawFacts = Readonly<{
++  modality: WhatsAppIngressModality;
++  origin: WhatsAppIngressOrigin;
++  forwardingScore: number;
++}>;
++
++export type WhatsAppIngressCanonicalContext = Readonly<{
++  channelId: string;
++  /** Provider recipient; OpenClaw 2026.9.2 resolves WhatsApp inbound hook conversations from this. */
++  to?: string;
++  accountId?: string;
++  conversationId?: string;
++  senderId?: string;
++  messageId?: string;
++  sessionKey?: string;
++  content: string;
++  timestamp?: number;
++  isGroup: boolean;
++  replyToId?: string;
++  replyToIdFull?: string;
++}>;
++
++export type WhatsAppIngressEnvelope = Readonly<{
++  schema_version: typeof SCHEMA_VERSION;
++  attestation_id: string;
++  channel: "whatsapp";
++  account_id: string;
++  conversation_id: string;
++  sender_id: string;
++  message_id: string;
++  session_key: string;
++  occurred_at_ms: number;
++  from_me: boolean;
++  is_group: boolean;
++  modality: WhatsAppIngressModality;
++  origin: WhatsAppIngressOrigin;
++  forwarding_score: number;
++  reply_to_id: string | null;
++  content_sha256: string;
++  content_normalization: typeof CONTENT_NORMALIZATION;
++}>;
++
++type TrustedRoute = Readonly<{
++  accountId: string;
++  conversationId: string;
++  senderId: string;
++}>;
++
++type EmitterConfig = Readonly<{
++  socketPath: string;
++  key: Uint8Array;
++  allowedRoutes: readonly TrustedRoute[];
++  timeoutMs: number;
++}>;
++
++export type WhatsAppIngressAttestationResult =
++  | "disabled"
++  | "configuration-invalid"
++  | "raw-facts-unavailable"
++  | "canonical-context-invalid"
++  | "scope-denied"
++  | "delivered"
++  | "delivery-absent-or-rejected"
++  | "delivery-uncertain";
++
++export type WhatsAppIngressDeliveryResult =
++  | "acknowledged"
++  | "unavailable"
++  | "rejected"
++  | "uncertain";
++
++const rawFactsKey: unique symbol = Symbol("whatsappIngressRawFacts");
++
++type RawFactsCarrier = {
++  [rawFactsKey]?: WhatsAppIngressRawFacts;
++};
++
++function isRecord(value: unknown): value is Record<string, unknown> {
++  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
++}
++
++function getFutureProofInnerMessage(message: proto.IMessage): proto.IMessage | undefined {
++  const contentType = getContentType(message);
++  const candidate = contentType ? (message as Record<string, unknown>)[contentType] : undefined;
++  if (!isRecord(candidate) || !isRecord(candidate.message)) {
++    return undefined;
++  }
++  const inner = normalizeMessageContent(candidate.message as proto.IMessage);
++  if (!inner) {
++    return undefined;
++  }
++  const innerType = getContentType(inner);
++  return innerType && innerType !== contentType ? inner : undefined;
++}
++
++function projectCurrentMessage(
++  message: proto.IMessage | null | undefined,
++): readonly proto.IMessage[] {
++  const chain: proto.IMessage[] = [];
++  let current = normalizeMessageContent(message ?? undefined);
++  while (current && chain.length < 4) {
++    chain.push(current);
++    current = getFutureProofInnerMessage(current);
++  }
++  return chain;
++}
++
++function currentMessageContextInfo(
++  projection: readonly proto.IMessage[],
++): proto.IContextInfo | undefined {
++  for (const message of projection) {
++    const contentType = getContentType(message);
++    const candidate = contentType ? (message as Record<string, unknown>)[contentType] : undefined;
++    if (isRecord(candidate) && candidate.contextInfo) {
++      return candidate.contextInfo as proto.IContextInfo;
++    }
++    const fallback =
++      message.extendedTextMessage?.contextInfo ??
++      message.imageMessage?.contextInfo ??
++      message.videoMessage?.contextInfo ??
++      message.documentMessage?.contextInfo ??
++      message.audioMessage?.contextInfo ??
++      message.stickerMessage?.contextInfo ??
++      message.buttonsResponseMessage?.contextInfo ??
++      message.listResponseMessage?.contextInfo ??
++      message.templateButtonReplyMessage?.contextInfo ??
++      message.interactiveResponseMessage?.contextInfo;
++    if (fallback) {
++      return fallback;
++    }
++  }
++  return undefined;
++}
++
++function exactId(value: unknown): value is string {
++  return typeof value === "string" && ID_PATTERN.test(value);
++}
++
++function readForwardingScore(value: unknown): number | null {
++  if (value === undefined || value === null) {
++    return 0;
++  }
++  if (typeof value === "number") {
++    return Number.isSafeInteger(value) && value >= 0 ? value : null;
++  }
++  if (typeof value === "bigint") {
++    return value >= 0n && value <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(value) : null;
++  }
++  if (typeof value === "string" && /^(0|[1-9][0-9]*)$/.test(value)) {
++    const parsed = Number(value);
++    return Number.isSafeInteger(parsed) ? parsed : null;
++  }
++  if (isRecord(value) && typeof value.toString === "function") {
++    const rendered = value.toString();
++    if (/^(0|[1-9][0-9]*)$/.test(rendered)) {
++      const parsed = Number(rendered);
++      return Number.isSafeInteger(parsed) ? parsed : null;
++    }
++  }
++  return null;
++}
++
++function modalityFromProjection(projection: readonly proto.IMessage[]): WhatsAppIngressModality {
++  for (const message of projection.toReversed()) {
++    if (message.audioMessage) {
++      return "audio";
++    }
++    if (message.imageMessage) {
++      return "image";
++    }
++    if (message.videoMessage || message.ptvMessage) {
++      return "video";
++    }
++    if (message.documentMessage) {
++      return "document";
++    }
++    if (message.stickerMessage) {
++      return "sticker";
++    }
++    if (message.contactMessage || message.contactsArrayMessage) {
++      return "contact";
++    }
++    if (message.locationMessage || message.liveLocationMessage) {
++      return "location";
++    }
++    if (
++      typeof message.conversation === "string" ||
++      typeof message.extendedTextMessage?.text === "string"
++    ) {
++      return "text";
++    }
++  }
++  return "unknown";
++}
++
++/** Captures facts from the current provider message only; quotedMessage is never traversed. */
++export function captureWhatsAppIngressRawFacts(
++  message: proto.IMessage | null | undefined,
++): WhatsAppIngressRawFacts {
++  const projection = projectCurrentMessage(message);
++  const modality = modalityFromProjection(projection);
++  const contextInfo = currentMessageContextInfo(projection);
++  const forwardingScore = readForwardingScore(contextInfo?.forwardingScore);
++  const forwardingFlag = contextInfo?.isForwarded;
++  const malformedFlag =
++    forwardingFlag !== undefined && forwardingFlag !== null && typeof forwardingFlag !== "boolean";
++  const origin: WhatsAppIngressOrigin =
++    forwardingFlag === true || (forwardingScore !== null && forwardingScore > 0)
++      ? "forwarded"
++      : projection.length === 0 ||
++          modality === "unknown" ||
++          forwardingScore === null ||
++          malformedFlag
++        ? "unknown"
++        : "direct";
++  return Object.freeze({
++    modality,
++    origin,
++    forwardingScore: forwardingScore ?? 0,
++  });
++}
++
++export function attachWhatsAppIngressRawFacts<T extends object>(
++  target: T,
++  facts: WhatsAppIngressRawFacts,
++): T {
++  Object.defineProperty(target, rawFactsKey, {
++    configurable: false,
++    enumerable: false,
++    writable: false,
++    value: facts,
++  });
++  return target;
++}
++
++export function copyWhatsAppIngressRawFacts<T extends object>(source: object, target: T): T {
++  const facts = resolveWhatsAppIngressRawFacts(source);
++  return facts ? attachWhatsAppIngressRawFacts(target, facts) : target;
++}
++
++export function resolveWhatsAppIngressRawFacts(
++  source: object,
++): WhatsAppIngressRawFacts | undefined {
++  return (source as RawFactsCarrier)[rawFactsKey];
++}
++
++function parseAllowedRoutes(raw: string | undefined): readonly TrustedRoute[] | null {
++  if (!raw) {
++    return null;
++  }
++  try {
++    const parsed: unknown = JSON.parse(raw);
++    if (!Array.isArray(parsed) || parsed.length === 0 || parsed.length > 1_000) {
++      return null;
++    }
++    const routes: TrustedRoute[] = [];
++    for (const entry of parsed) {
++      if (!isRecord(entry)) {
++        return null;
++      }
++      const keys = Object.keys(entry).toSorted();
++      if (
++        keys.length !== 3 ||
++        keys[0] !== "accountId" ||
++        keys[1] !== "conversationId" ||
++        keys[2] !== "senderId" ||
++        !exactId(entry.accountId) ||
++        !exactId(entry.conversationId) ||
++        !exactId(entry.senderId)
++      ) {
++        return null;
++      }
++      routes.push(
++        Object.freeze({
++          accountId: entry.accountId,
++          conversationId: entry.conversationId,
++          senderId: entry.senderId,
++        }),
++      );
++    }
++    return Object.freeze(routes);
++  } catch {
++    return null;
++  }
++}
++
++function resolveEmitterConfig(env: NodeJS.ProcessEnv): EmitterConfig | "disabled" | null {
++  if (env[ENABLED_ENV] !== "true") {
++    return "disabled";
++  }
++  const socketPath = env[SOCKET_ENV];
++  const keyEnvName = env[KEY_NAME_ENV];
++  const routes = parseAllowedRoutes(env[ROUTES_ENV]);
++  if (
++    !socketPath ||
++    !path.isAbsolute(socketPath) ||
++    Buffer.byteLength(socketPath, "utf8") > 100 ||
++    socketPath.includes("\0") ||
++    !keyEnvName ||
++    !ENV_NAME_PATTERN.test(keyEnvName) ||
++    !routes
++  ) {
++    return null;
++  }
++  const keyValue = env[keyEnvName];
++  if (typeof keyValue !== "string") {
++    return null;
++  }
++  const key = Buffer.from(keyValue, "utf8");
++  if (key.byteLength < 32 || key.byteLength > 4_096) {
++    return null;
++  }
++  return Object.freeze({ socketPath, key, allowedRoutes: routes, timeoutMs: DEFAULT_TIMEOUT_MS });
++}
++
++function routeAllowed(config: EmitterConfig, canonical: WhatsAppIngressCanonicalContext): boolean {
++  return config.allowedRoutes.some(
++    (route) =>
++      route.accountId === canonical.accountId &&
++      route.conversationId === canonical.conversationId &&
++      route.senderId === canonical.senderId,
++  );
++}
++
++function sha256(value: string): string {
++  return createHash("sha256").update(value, "utf8").digest("hex");
++}
++
++export function whatsappIngressAttestationId(
++  accountId: string,
++  conversationId: string,
++  messageId: string,
++): string {
++  return sha256(`${accountId}\0${conversationId}\0${messageId}`);
++}
++
++export function buildWhatsAppIngressEnvelope(params: {
++  canonical: WhatsAppIngressCanonicalContext;
++  rawFacts: WhatsAppIngressRawFacts;
++  fromMe: boolean;
++}): WhatsAppIngressEnvelope | null {
++  const { canonical, rawFacts } = params;
++  const occurredAtMs = canonical.timestamp;
++  if (
++    canonical.channelId !== "whatsapp" ||
++    !exactId(canonical.accountId) ||
++    !exactId(canonical.conversationId) ||
++    !exactId(canonical.senderId) ||
++    !exactId(canonical.messageId) ||
++    !exactId(canonical.sessionKey) ||
++    typeof canonical.content !== "string" ||
++    typeof occurredAtMs !== "number" ||
++    !Number.isSafeInteger(occurredAtMs) ||
++    occurredAtMs < 0 ||
++    typeof canonical.isGroup !== "boolean" ||
++    typeof params.fromMe !== "boolean"
++  ) {
++    return null;
++  }
++  const replyToId = canonical.replyToIdFull ?? canonical.replyToId ?? null;
++  if (replyToId !== null && !exactId(replyToId)) {
++    return null;
++  }
++  if (
++    !Number.isSafeInteger(rawFacts.forwardingScore) ||
++    rawFacts.forwardingScore < 0 ||
++    ![
++      "text",
++      "audio",
++      "image",
++      "video",
++      "document",
++      "sticker",
++      "contact",
++      "location",
++      "unknown",
++    ].includes(rawFacts.modality) ||
++    !["direct", "forwarded", "unknown"].includes(rawFacts.origin)
++  ) {
++    return null;
++  }
++  return Object.freeze({
++    schema_version: SCHEMA_VERSION,
++    attestation_id: whatsappIngressAttestationId(
++      canonical.accountId,
++      canonical.conversationId,
++      canonical.messageId,
++    ),
++    channel: "whatsapp",
++    account_id: canonical.accountId,
++    conversation_id: canonical.conversationId,
++    sender_id: canonical.senderId,
++    message_id: canonical.messageId,
++    session_key: canonical.sessionKey,
++    occurred_at_ms: occurredAtMs,
++    from_me: params.fromMe,
++    is_group: canonical.isGroup,
++    modality: rawFacts.modality,
++    origin: rawFacts.origin,
++    forwarding_score: rawFacts.forwardingScore,
++    reply_to_id: replyToId,
++    content_sha256: sha256(canonical.content),
++    content_normalization: CONTENT_NORMALIZATION,
++  });
++}
++
++/** Binary/code-unit key ordering; never localeCompare or value normalization. */
++export function canonicalWhatsAppIngressEnvelope(envelope: WhatsAppIngressEnvelope): string {
++  return `{${Object.entries(envelope)
++    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
++    .map(([key, value]) => `${JSON.stringify(key)}:${JSON.stringify(value)}`)
++    .join(",")}}`;
++}
++
++export function signWhatsAppIngressEnvelope(
++  envelope: WhatsAppIngressEnvelope,
++  key: Uint8Array,
++): string {
++  if (key.byteLength < 32 || key.byteLength > 4_096) {
++    throw new Error("invalid ingress attestation key");
++  }
++  return `v1=${createHmac("sha256", key)
++    .update(canonicalWhatsAppIngressEnvelope(envelope), "utf8")
++    .digest("hex")}`;
++}
++
++export async function deliverWhatsAppIngressAttestation(params: {
++  socketPath: string;
++  envelope: WhatsAppIngressEnvelope;
++  signature: string;
++  timeoutMs?: number;
++}): Promise<WhatsAppIngressDeliveryResult> {
++  const timeoutMs = params.timeoutMs ?? DEFAULT_TIMEOUT_MS;
++  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 5_000) {
++    return "rejected";
++  }
++  const frame = `${JSON.stringify({ envelope: params.envelope, signature: params.signature })}\n`;
++  if (Buffer.byteLength(frame, "utf8") > MAX_LINE_BYTES) {
++    return "rejected";
++  }
++  const expectedAck = `ACK ${params.envelope.attestation_id}\n`;
++  const expectedNack = "NACK INVALID\n";
++  return await new Promise<WhatsAppIngressDeliveryResult>((resolve) => {
++    let settled = false;
++    let connected = false;
++    let response = Buffer.alloc(0);
++    let socket: net.Socket | undefined;
++    const finish = (result: WhatsAppIngressDeliveryResult) => {
++      if (settled) {
++        return;
++      }
++      settled = true;
++      clearTimeout(deadline);
++      socket?.destroy();
++      resolve(result);
++    };
++    const classifyCompleteResponse = (): WhatsAppIngressDeliveryResult => {
++      const rendered = response.toString("utf8");
++      if (rendered === expectedAck) {
++        return "acknowledged";
++      }
++      if (rendered === expectedNack) {
++        return "rejected";
++      }
++      return connected ? "uncertain" : "unavailable";
++    };
++    const deadline = setTimeout(() => finish(connected ? "uncertain" : "unavailable"), timeoutMs);
++    deadline.unref?.();
++    try {
++      socket = net.createConnection({ path: params.socketPath });
++    } catch {
++      clearTimeout(deadline);
++      resolve("unavailable");
++      return;
++    }
++    socket.once("connect", () => {
++      connected = true;
++      socket?.end(frame);
++    });
++    socket.once("error", () => finish(connected ? "uncertain" : "unavailable"));
++    socket.on("data", (chunk: Buffer) => {
++      response = Buffer.concat([response, chunk]);
++      if (
++        response.byteLength > MAX_ACK_BYTES ||
++        (response.byteLength > Buffer.byteLength(expectedAck, "utf8") &&
++          response.byteLength > Buffer.byteLength(expectedNack, "utf8"))
++      ) {
++        finish("uncertain");
++      }
++    });
++    socket.once("end", () => finish(classifyCompleteResponse()));
++    socket.once("close", () => finish(classifyCompleteResponse()));
++  });
++}
++
++/**
++ * Best-effort availability, fail-closed authorization: normal chat continues on failure. A
++ * missing ACK is not proof of a missing commit; only Norte's durable HMAC-bound proof is
++ * authoritative, and an uncertain outcome must not ask the human to authorize the action again.
++ */
++export async function attestWhatsAppInboundBeforeHooks(params: {
++  message: object;
++  canonical: WhatsAppIngressCanonicalContext;
++  conversationKind: "direct" | "group";
++  fromMe: boolean;
++  env?: NodeJS.ProcessEnv;
++}): Promise<WhatsAppIngressAttestationResult> {
++  const config = resolveEmitterConfig(params.env ?? process.env);
++  if (config === "disabled") {
++    return "disabled";
++  }
++  if (!config) {
++    return "configuration-invalid";
++  }
++  const rawFacts = resolveWhatsAppIngressRawFacts(params.message);
++  if (!rawFacts) {
++    return "raw-facts-unavailable";
++  }
++  // Match the exact conversation identity projected by toPluginInboundClaimPair and later passed
++  // to before_dispatch. In OpenClaw 2026.9.2 WhatsApp has no channel-specific resolver, so the
++  // generic resolver selects `to` before the earlier canonical conversation fallback.
++  const canonical = {
++    ...params.canonical,
++    conversationId: params.canonical.to ?? params.canonical.conversationId,
++    isGroup: params.conversationKind === "group",
++  };
++  if (!routeAllowed(config, canonical)) {
++    return "scope-denied";
++  }
++  const envelope = buildWhatsAppIngressEnvelope({
++    canonical,
++    rawFacts,
++    fromMe: params.fromMe,
++  });
++  if (!envelope) {
++    return "canonical-context-invalid";
++  }
++  const signature = signWhatsAppIngressEnvelope(envelope, config.key);
++  const delivery = await deliverWhatsAppIngressAttestation({
++    socketPath: config.socketPath,
++    envelope,
++    signature,
++    timeoutMs: config.timeoutMs,
++  });
++  if (delivery === "acknowledged") {
++    return "delivered";
++  }
++  return delivery === "uncertain" ? "delivery-uncertain" : "delivery-absent-or-rejected";
++}
