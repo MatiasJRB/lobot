@@ -18,6 +18,7 @@ import {
   accountantCommandEditArgs,
 } from "./accountant/cron-schedule.js";
 import { createAccountantCronRouter } from "./accountant/routes.js";
+import { buildPersonalAudioMediaConfig } from "./personal/audio.js";
 import {
   collectPersonalDigest,
   getPersonalSourceStatus,
@@ -315,6 +316,22 @@ async function syncAllowedOrigins() {
 
 async function syncGatewayRuntimeConfig() {
   await syncAllowedOrigins();
+
+  const mediaConfig = buildPersonalAudioMediaConfig();
+  for (const [configKey, configValue] of [
+    ["tools.media.models", mediaConfig.models],
+    ["tools.media.audio", mediaConfig.audio],
+  ]) {
+    const mediaResult = await runCmd(
+      OPENCLAW_NODE,
+      clawArgs(["config", "set", "--json", configKey, JSON.stringify(configValue)]),
+    );
+    if (mediaResult.code === 0) {
+      console.log("gateway", `synced ${configKey}`);
+    } else {
+      console.warn("gateway", `failed to sync ${configKey} (exit=${mediaResult.code})`);
+    }
+  }
 
   const tokenResult = await runCmd(
     OPENCLAW_NODE,
