@@ -111,27 +111,34 @@ export class CodexAppServerClient extends EventEmitter {
 
   async start() {
     if (this.child) return;
-    this.child = this.processFactory
+    const child = this.processFactory
       ? this.processFactory()
       : childProcess.spawn(this.codexPath, ["app-server", "--stdio"], {
           stdio: ["pipe", "pipe", "pipe"],
           env: process.env,
         });
+    this.child = child;
+    // A recycled server exits some time after stop(), usually once its
+    // replacement is already running. Only the current child may touch shared
+    // state; otherwise its late exit drops the new child, which then leaks.
+    const isCurrent = () => this.child === child;
 
-    readline.createInterface({ input: this.child.stdout }).on("line", (line) => {
-      this.#handleLine(line);
+    readline.createInterface({ input: child.stdout }).on("line", (line) => {
+      if (isCurrent()) this.#handleLine(line);
     });
-    this.child.stderr?.on("data", (chunk) => this.emit("stderr", chunk.toString()));
-    this.child.stdin.on("error", (error) => this.emit("protocolError", error));
-    this.child.on("error", (error) => {
-      for (const pending of this.pending.values()) pending.reject(error);
-      this.pending.clear();
+    child.stderr?.on("data", (chunk) => this.emit("stderr", chunk.toString()));
+    child.stdin.on("error", (error) => {
+      if (isCurrent()) this.emit("protocolError", error);
+    });
+    child.on("error", (error) => {
+      if (!isCurrent()) return;
+      this.#rejectPending(error);
       this.emit("protocolError", error);
     });
-    this.child.on("exit", (code, signal) => {
+    child.on("exit", (code, signal) => {
+      if (!isCurrent()) return;
       const error = new Error(`Codex App Server exited (code=${code}, signal=${signal})`);
-      for (const pending of this.pending.values()) pending.reject(error);
-      this.pending.clear();
+      this.#rejectPending(error);
       this.child = null;
       this.emit("exit", error);
     });
@@ -148,9 +155,18 @@ export class CodexAppServerClient extends EventEmitter {
   }
 
   stop() {
-    if (!this.child) return;
-    this.child.kill("SIGTERM");
+    const child = this.child;
+    if (!child) return;
     this.child = null;
+    this.#rejectPending(new Error("Codex App Server stopped"));
+    // EOF on stdin also ends the server if it is slow to honor SIGTERM.
+    child.stdin?.end();
+    child.kill("SIGTERM");
+  }
+
+  #rejectPending(error) {
+    for (const pending of this.pending.values()) pending.reject(error);
+    this.pending.clear();
   }
 
   request(method, params) {

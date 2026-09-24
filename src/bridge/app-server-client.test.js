@@ -91,3 +91,36 @@ test("Codex error notifications do not trigger EventEmitter's fatal error event"
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(errors, [{ message: "bad model" }]);
 });
+
+function lateExitProcess() {
+  const child = fakeProcess();
+  child.killedWith = null;
+  // A real app-server exits some time after SIGTERM, not synchronously.
+  child.kill = (signal) => {
+    child.killedWith = signal;
+  };
+  return child;
+}
+
+test("a recycled app-server that exits late does not orphan its replacement", async () => {
+  const spawned = [];
+  const client = new CodexAppServerClient({
+    processFactory: () => {
+      const child = lateExitProcess();
+      spawned.push(child);
+      return child;
+    },
+  });
+  await client.start();
+  const [first] = spawned;
+  client.stop();
+  assert.equal(first.killedWith, "SIGTERM");
+
+  await client.start();
+  const [, second] = spawned;
+  first.emit("exit", 0, null);
+
+  assert.deepEqual(await client.listThreads(), threads);
+  client.stop();
+  assert.equal(second.killedWith, "SIGTERM");
+});
