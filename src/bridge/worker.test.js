@@ -56,6 +56,30 @@ test("runWorkerOnce publishes threads and completes a claimed job", async () => 
   assert.equal(api.calls[2][2].response, "respuesta");
 });
 
+test("knowledge queries run locally without opening a Codex thread", async () => {
+  const api = apiFixture({ id: "knowledge-1", source: "knowledge-hub-query", prompt: "viajes" });
+  let codexJobs = 0;
+  const codex = {
+    async listThreads() { return []; },
+    async runJob() { codexJobs += 1; },
+  };
+  const result = await runWorkerOnce({
+    api,
+    codex,
+    workerId: "mac",
+    knowledgeQuery(job) {
+      assert.equal(job.prompt, "viajes");
+      return { threadName: "Conocimiento personal", response: "resultado local" };
+    },
+  });
+
+  assert.equal(result.processed, true);
+  assert.equal(codexJobs, 0);
+  const completion = api.calls.find(([name]) => name === "complete")[2];
+  assert.equal(completion.status, "done");
+  assert.equal(completion.response, "resultado local");
+});
+
 test("runWorkerOnce returns candidates when a selector is ambiguous", async () => {
   const api = apiFixture({ id: "job-2", prompt: "hola" });
   const codex = {

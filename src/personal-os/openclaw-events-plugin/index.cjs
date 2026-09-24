@@ -3,6 +3,7 @@ const fs = require('node:fs');
 
 const OUTBOX = process.env.PERSONAL_OS_OPENCLAW_EVENTS_FILE || '/data/personal-os-openclaw-events.ndjson';
 const MAX_TEXT = 4000;
+const KNOWLEDGE_TIMEOUT_MS = 40_000;
 
 function bounded(value, limit = 200) {
   return typeof value === 'string' && value.length > 0 && value.length <= limit ? value : null;
@@ -100,9 +101,98 @@ function appendEvent(record, filename = OUTBOX) {
   }
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function bridgeBaseUrl(env = process.env) {
+  return env.CODEX_BRIDGE_URL?.trim() ||
+    `http://127.0.0.1:${env.PORT || 8080}/bridge/api`;
+}
+
+async function bridgeRequest(baseUrl, token, pathname, options = {}) {
+  const response = await fetch(`${baseUrl.replace(/\/$/, '')}${pathname}`, {
+    ...options,
+    headers: {
+      authorization: `Bearer ${token}`,
+      ...(options.body ? { 'content-type': 'application/json' } : {}),
+    },
+    signal: AbortSignal.timeout(10_000),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.error || `Bridge API HTTP ${response.status}`);
+  return payload;
+}
+
+async function queryKnowledgeBridge(query, toolCallId, {
+  baseUrl = bridgeBaseUrl(),
+  token = process.env.CODEX_BRIDGE_TOKEN?.trim(),
+  request = bridgeRequest,
+  wait = sleep,
+  timeoutMs = KNOWLEDGE_TIMEOUT_MS,
+  assertCurrent = () => {},
+} = {}) {
+  const normalized = String(query || '').replace(/\s+/g, ' ').trim().slice(0, 500);
+  if (!normalized) throw new TypeError('query is required');
+  if (!baseUrl || !token) throw new Error('Knowledge bridge is not configured');
+  assertCurrent();
+  const digest = crypto.createHash('sha256').update(String(toolCallId || crypto.randomUUID()))
+    .digest('hex');
+  const queued = await request(baseUrl, token, '/jobs', {
+    method: 'POST',
+    body: JSON.stringify({
+      prompt: normalized,
+      thread: 'recent',
+      mode: 'read-only',
+      idempotencyKey: `knowledge-tool:${digest}`,
+      source: 'knowledge-hub-query',
+    }),
+  });
+  const jobId = queued?.job?.id;
+  if (!jobId) throw new Error('Knowledge bridge did not return a job');
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    await wait(750);
+    const current = await request(baseUrl, token, `/jobs/${encodeURIComponent(jobId)}`);
+    const job = current?.job;
+    if (job?.status === 'done' && typeof job.response === 'string') return job.response;
+    if (job && ['failed', 'needs_attention'].includes(job.status)) {
+      throw new Error(job.error || job.response || 'Knowledge query failed');
+    }
+  }
+  throw new Error('Knowledge query timed out');
+}
+
+function knowledgeTool(context) {
+  if (context?.senderIsOwner !== true) return null;
+  return {
+    name: 'knowledge_search',
+    label: 'Buscar conocimiento personal',
+    description: 'Consulta el Knowledge Hub local de Matías. Usar primero para preguntas como qué sabemos, qué está registrado, qué recordamos o qué contexto existe sobre un tema. Devuelve sólo resultados permitidos y con fuentes.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['query'],
+      properties: {
+        query: { type: 'string', minLength: 2, maxLength: 500,
+          description: 'Consulta concreta en español.' },
+      },
+    },
+    async execute(toolCallId, params) {
+      const text = await queryKnowledgeBridge(params?.query, toolCallId, {
+        assertCurrent: context.assertInvocationCurrent || (() => {}),
+      });
+      return { content: [{ type: 'text', text }], details: { source: 'knowledge-hub' } };
+    },
+  };
+}
+
 module.exports = {
   id: 'personal-os-events',
   register(api) {
+    if (typeof api.registerTool === 'function') {
+      api.registerTool(knowledgeTool, { name: 'knowledge_search' });
+    }
     api.on('message_received', (event, context) => {
       const record = projectReceived(event, context);
       if (!record) return;
@@ -120,4 +210,7 @@ module.exports = {
   projectSent,
   appendEvent,
   eventTime,
+  queryKnowledgeBridge,
+  bridgeBaseUrl,
+  knowledgeTool,
 };

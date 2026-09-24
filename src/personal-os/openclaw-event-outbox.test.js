@@ -51,8 +51,14 @@ test("WhatsApp transport hook writes private, stable inbound facts", () => {
 
 test("outbound hook distinguishes provider acceptance from uncertain and failed sends", () => {
   const hooks = [];
-  plugin.register({ on: (name) => hooks.push(name) });
+  const tools = [];
+  plugin.register({
+    on: (name) => hooks.push(name),
+    registerTool: (tool, options) => tools.push({ tool, options }),
+  });
   assert.deepEqual(hooks, ["message_received", "message_sent"]);
+  assert.equal(tools[0].tool, plugin.knowledgeTool);
+  assert.deepEqual(tools[0].options, { name: "knowledge_search" });
   const context = { channelId: "whatsapp", accountId: "default", conversationId: "chat-1" };
   const accepted = plugin.projectSent({ to: "chat-1", content: "hola",
     success: true, messageId: "provider-1" }, context);
@@ -68,4 +74,34 @@ test("outbound hook distinguishes provider acceptance from uncertain and failed 
   assert.equal(plugin.projectSent({ to: "chat-1", content: "hola", success: true },
     { ...context, channelId: "telegram" }), null);
   assert.equal(plugin.projectSent({ to: "other", content: "hola", success: true }, context), null);
+});
+
+test("owner-only knowledge tool waits for the local bridge result", async () => {
+  assert.equal(plugin.knowledgeTool({ senderIsOwner: false }), null);
+  assert.equal(plugin.bridgeBaseUrl({ PORT: "8080" }),
+    "http://127.0.0.1:8080/bridge/api");
+  assert.equal(plugin.bridgeBaseUrl({ PORT: "9090", CODEX_BRIDGE_URL: "  " }),
+    "http://127.0.0.1:9090/bridge/api");
+  assert.equal(plugin.bridgeBaseUrl({ CODEX_BRIDGE_URL: " https://bridge.example/api/ " }),
+    "https://bridge.example/api/");
+  const calls = [];
+  let poll = 0;
+  const result = await plugin.queryKnowledgeBridge("qué sabemos de viajes", "tool-1", {
+    baseUrl: "https://bridge.test",
+    token: "private",
+    wait: async () => {},
+    request: async (_base, _token, pathname, options) => {
+      calls.push([pathname, options]);
+      if (pathname === "/jobs") return { job: { id: "job-1" } };
+      poll += 1;
+      return poll === 1
+        ? { job: { id: "job-1", status: "running" } }
+        : { job: { id: "job-1", status: "done", response: "resultado con fuente" } };
+    },
+  });
+  assert.equal(result, "resultado con fuente");
+  const body = JSON.parse(calls[0][1].body);
+  assert.equal(body.source, "knowledge-hub-query");
+  assert.equal(body.mode, "read-only");
+  assert.equal(body.reply, undefined);
 });

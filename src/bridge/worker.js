@@ -10,6 +10,7 @@ import {
 } from "./app-server-client.js";
 import { pullPersonalOsEvents } from "./personal-os-events.js";
 import { pullPersonalOsNotices } from "./personal-os-notices.js";
+import { runKnowledgeQuery } from "./knowledge-query.js";
 
 export const WORKER_VERSION = "0.1.0";
 const MAX_BUSY_ATTEMPTS = 12;
@@ -46,7 +47,8 @@ function selectorFailure(error) {
   return `${error.message}.${candidates}`;
 }
 
-export async function runWorkerOnce({ api, codex, workerId, leaseMs = 35 * 60 * 1000 }) {
+export async function runWorkerOnce({ api, codex, workerId, leaseMs = 35 * 60 * 1000,
+  knowledgeQuery = runKnowledgeQuery }) {
   if (typeof api.listPersonalOsNotices === "function") {
     try {
       await pullPersonalOsNotices(api);
@@ -74,7 +76,9 @@ export async function runWorkerOnce({ api, codex, workerId, leaseMs = 35 * 60 * 
   if (!job) return { processed: false };
 
   try {
-    const result = await codex.runJob(job, { timeoutMs: leaseMs - 60_000 });
+    const result = job.source === "knowledge-hub-query"
+      ? await knowledgeQuery(job)
+      : await codex.runJob(job, { timeoutMs: leaseMs - 60_000 });
     const completed = await api.completeJob(job.id, {
       workerId,
       status: "done",

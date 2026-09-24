@@ -27,6 +27,18 @@
   agregá `--mode workspace-write` sólo cuando Matías pida expresamente modificar
   archivos. El resultado vuelve automáticamente a su WhatsApp: no sostengas una
   espera larga dentro del turno de Gemini.
+- Base de conocimiento personal: cuando Matías pregunte qué sabemos, recuerde un
+  dato previo o quiera consultar el Knowledge Hub, usá primero la herramienta
+  nativa `knowledge_search` y respondé en el mismo turno con el resultado y sus
+  fuentes. Si esa herramienta no está disponible en el contexto actual, usá como
+  fallback síncrono
+  `node /app/src/cli/codex-bridge.js knowledge --query "<consulta exacta>" --idempotency-key "<id estable del mensaje inbound>" --wait --no-reply`
+  y respondé con la salida del comando. La consulta se resuelve de forma local y
+  read-only en la Mac, excluye páginas `restricted` y propuestas no verificadas.
+  No uses el comando sin `--wait` durante una conversación: eso enviaría una
+  segunda respuesta asíncrona por WhatsApp y dejaría el turno actual sin la fuente.
+  No la mandes a un task de Codex ni inventes una respuesta desde historial o
+  memoria si la consulta falla.
 - Contador autónomo: los cron instalados por
   `POST /setup/api/crons/install-accountant` ejecutan
   `node /app/src/cron/dispatch-accountant.js --cadence <monitor|billing|payment>`

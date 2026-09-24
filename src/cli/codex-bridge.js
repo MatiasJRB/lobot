@@ -5,6 +5,13 @@ import { pathToFileURL } from "node:url";
 
 import { BridgeApiClient } from "../bridge/api-client.js";
 
+const KNOWLEDGE_WAIT_TIMEOUT_MS = 40_000;
+const KNOWLEDGE_POLL_INTERVAL_MS = 750;
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function argValue(name, args = process.argv.slice(2)) {
   const index = args.indexOf(name);
   return index >= 0 ? args[index + 1] : null;
@@ -33,7 +40,12 @@ function formatThreads(threads) {
     .join("\n");
 }
 
-export async function runCli(args, { client = clientFromEnv(), output = console.log } = {}) {
+export async function runCli(args, {
+  client = clientFromEnv(),
+  output = console.log,
+  wait = delay,
+  now = Date.now,
+} = {}) {
   const command = args[0];
   if (command === "threads") {
     const { threads } = await client.listThreads();
@@ -60,6 +72,42 @@ export async function runCli(args, { client = clientFromEnv(), output = console.
     );
     return;
   }
+  if (command === "knowledge") {
+    const query = requireValue("--query", args);
+    const idempotencyKey = argValue("--idempotency-key", args) || crypto.randomUUID();
+    const shouldWait = args.includes("--wait");
+    const reply = args.includes("--no-reply") || shouldWait
+      ? undefined
+      : { channel: "whatsapp-self" };
+    const result = await client.enqueueJob({
+      prompt: query,
+      thread: "recent",
+      mode: "read-only",
+      idempotencyKey,
+      source: "knowledge-hub-query",
+      ...(reply ? { reply } : {}),
+    });
+    if (shouldWait) {
+      const deadline = now() + KNOWLEDGE_WAIT_TIMEOUT_MS;
+      while (now() < deadline) {
+        await wait(KNOWLEDGE_POLL_INTERVAL_MS);
+        const { job } = await client.getJob(result.job.id);
+        if (job?.status === "done" && typeof job.response === "string") {
+          output(job.response);
+          return;
+        }
+        if (job && ["failed", "needs_attention"].includes(job.status)) {
+          throw new Error(job.error || job.response || "Knowledge query failed");
+        }
+      }
+      throw new Error("Knowledge query timed out");
+    }
+    output(
+      `${result.created ? "Consulta encolada" : "Consulta ya existente"}: ${result.job.id}\n` +
+        `Estado: ${result.job.status}. El resultado vuelve por WhatsApp sin abrir un hilo de Codex.`,
+    );
+    return;
+  }
   if (command === "status") {
     const jobId = requireValue("--job-id", args);
     const { job } = await client.getJob(jobId);
@@ -67,7 +115,7 @@ export async function runCli(args, { client = clientFromEnv(), output = console.
     return;
   }
   throw new Error(
-    "Usage: codex-bridge.js threads | enqueue --thread <recent|new|id|title> --prompt <text> [--mode read-only|workspace-write] | status --job-id <id>",
+    "Usage: codex-bridge.js threads | enqueue --thread <recent|new|id|title> --prompt <text> [--mode read-only|workspace-write] | knowledge --query <text> [--idempotency-key <id>] [--wait] [--no-reply] | status --job-id <id>",
   );
 }
 
