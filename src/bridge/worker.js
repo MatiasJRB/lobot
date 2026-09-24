@@ -111,8 +111,19 @@ export async function runWorker({ api, codex, workerId, pollMs = 5_000, once = f
     try {
       await codex.start();
       const result = await runWorkerOnce({ api, codex, workerId });
-      if (!result.processed && !once) await sleep(pollMs);
+      if (result.processed) {
+        // Resuming a Codex thread gives this app-server process its writer lock.
+        // The app-server keeps that lock until the process exits, even after the
+        // turn completes, so recycle it after every claimed job. Otherwise a
+        // WhatsApp dispatch can leave the pinned desktop task unusable forever.
+        codex.stop();
+      } else if (!once) {
+        await sleep(pollMs);
+      }
     } catch (error) {
+      // A timed-out/failed turn can retain the same writer lock. Always discard
+      // the client before retrying so the next loop starts with a clean server.
+      codex.stop();
       console.error(`[codex-bridge] ${error.message}`);
       if (!once) await sleep(Math.max(pollMs, 10_000));
     }

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { ThreadSelectorError } from "./app-server-client.js";
-import { runWorkerOnce, summarizeThreads } from "./worker.js";
+import { runWorker, runWorkerOnce, summarizeThreads } from "./worker.js";
 
 function apiFixture(job) {
   const calls = [];
@@ -102,4 +102,35 @@ test("persistent active writer eventually needs attention, not an infinite retry
   const completion = api.calls.find(([name]) => name === "complete")[2];
   assert.equal(completion.status, "needs_attention");
   assert.match(completion.response, /ocupado/);
+});
+
+test("runWorker releases the Codex writer after every processed job", async () => {
+  const api = apiFixture({ id: "job-3", prompt: "hola" });
+  const calls = [];
+  const codex = {
+    async start() { calls.push("start"); },
+    async listThreads() { return []; },
+    async runJob() {
+      return { threadId: "thread-1", threadName: "Secretario", response: "respuesta" };
+    },
+    stop() { calls.push("stop"); },
+  };
+
+  await runWorker({ api, codex, workerId: "mac", once: true });
+
+  assert.deepEqual(calls, ["start", "stop"]);
+});
+
+test("runWorker releases the Codex writer after a failed loop", async () => {
+  const api = apiFixture(null);
+  const calls = [];
+  const codex = {
+    async start() { calls.push("start"); },
+    async listThreads() { throw new Error("boom"); },
+    stop() { calls.push("stop"); },
+  };
+
+  await runWorker({ api, codex, workerId: "mac", once: true });
+
+  assert.deepEqual(calls, ["start", "stop"]);
 });
