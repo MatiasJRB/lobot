@@ -163,6 +163,49 @@ async function queryKnowledgeBridge(query, toolCallId, {
   throw new Error('Knowledge query timed out');
 }
 
+async function captureCommitmentBridge(payload, toolCallId, {
+  baseUrl = bridgeBaseUrl(),
+  token = process.env.CODEX_BRIDGE_TOKEN?.trim(),
+  request = bridgeRequest,
+  wait = sleep,
+  timeoutMs = KNOWLEDGE_TIMEOUT_MS,
+  assertCurrent = () => {},
+} = {}) {
+  if (!baseUrl || !token) throw new Error('Commitment bridge is not configured');
+  assertCurrent();
+  const digest = crypto.createHash('sha256').update(String(toolCallId || crypto.randomUUID()))
+    .digest('hex');
+  const normalized = {
+    ...payload,
+    source_ref: `openclaw-tool:${digest}`,
+    now: new Date().toISOString(),
+    channels: ['whatsapp-self'],
+  };
+  const queued = await request(baseUrl, token, '/jobs', {
+    method: 'POST',
+    body: JSON.stringify({
+      prompt: JSON.stringify(normalized),
+      thread: 'recent',
+      mode: 'workspace-write',
+      idempotencyKey: `commitment-tool:${digest}`,
+      source: 'personal-os-commitment-capture',
+    }),
+  });
+  const jobId = queued?.job?.id;
+  if (!jobId) throw new Error('Commitment bridge did not return a job');
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    await wait(750);
+    const current = await request(baseUrl, token, `/jobs/${encodeURIComponent(jobId)}`);
+    const job = current?.job;
+    if (job?.status === 'done' && typeof job.response === 'string') return job.response;
+    if (job && ['failed', 'needs_attention'].includes(job.status)) {
+      throw new Error(job.error || job.response || 'Commitment capture failed');
+    }
+  }
+  throw new Error('Commitment capture timed out');
+}
+
 function knowledgeTool(context) {
   if (context?.senderIsOwner !== true) return null;
   return {
@@ -187,11 +230,57 @@ function knowledgeTool(context) {
   };
 }
 
+function commitmentTool(context) {
+  if (context?.senderIsOwner !== true) return null;
+  return {
+    name: 'commitment_capture',
+    label: 'Registrar compromiso material',
+    description: 'Registra o deduplica en Personal OS una compra, entrega, trámite, turno, devolución u otro asunto material con seguimiento. Usar sólo cuando hay un compromiso real y todos los campos, incluido un plazo verificable, están disponibles.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['card_id', 'title', 'domain', 'outcome', 'status', 'priority', 'owner',
+        'current_state', 'next_action', 'next_check_at', 'closure_condition',
+        'material_kind', 'progress_state', 'deadline_at', 'identities'],
+      properties: {
+        card_id: { type: 'string', pattern: '^[a-z0-9][a-z0-9_-]{1,199}$' },
+        title: { type: 'string', minLength: 2, maxLength: 300 },
+        domain: { type: 'string', minLength: 2, maxLength: 100 },
+        outcome: { type: 'string', minLength: 2, maxLength: 1000 },
+        status: { type: 'string', enum: ['ready_for_secretary', 'waiting_external',
+          'needs_user_action', 'needs_user_authorization', 'authorized_scheduled_send', 'scheduled'] },
+        priority: { type: 'string', enum: ['critical', 'high', 'medium', 'low'] },
+        owner: { type: 'string', enum: ['secretario', 'matias'] },
+        current_state: { type: 'string', minLength: 2, maxLength: 4000 },
+        next_action: { type: 'string', minLength: 2, maxLength: 4000 },
+        next_check_at: { type: 'string', description: 'ISO-8601 con zona horaria.' },
+        closure_condition: { type: 'string', minLength: 2, maxLength: 2000 },
+        material_kind: { type: 'string', minLength: 2, maxLength: 80 },
+        progress_state: { type: 'string', enum: ['captured', 'prepared', 'sent', 'received',
+          'pickup_pending', 'picked_up', 'refund_pending', 'refunded'] },
+        deadline_at: { type: 'string', description: 'Plazo real ISO-8601 con zona horaria.' },
+        identities: { type: 'array', minItems: 1, maxItems: 10,
+          items: { type: 'string', pattern: '^[^:]+:.+$' } },
+        amount_value: { type: 'number', minimum: 0 },
+        amount_currency: { type: 'string', minLength: 3, maxLength: 12 },
+        metadata: { type: 'object', additionalProperties: true },
+      },
+    },
+    async execute(toolCallId, params) {
+      const text = await captureCommitmentBridge(params, toolCallId, {
+        assertCurrent: context.assertInvocationCurrent || (() => {}),
+      });
+      return { content: [{ type: 'text', text }], details: { source: 'personal-os' } };
+    },
+  };
+}
+
 module.exports = {
   id: 'personal-os-events',
   register(api) {
     if (typeof api.registerTool === 'function') {
       api.registerTool(knowledgeTool, { name: 'knowledge_search' });
+      api.registerTool(commitmentTool, { name: 'commitment_capture' });
     }
     api.on('message_received', (event, context) => {
       const record = projectReceived(event, context);
@@ -211,6 +300,8 @@ module.exports = {
   appendEvent,
   eventTime,
   queryKnowledgeBridge,
+  captureCommitmentBridge,
   bridgeBaseUrl,
   knowledgeTool,
+  commitmentTool,
 };

@@ -80,6 +80,41 @@ test("knowledge queries run locally without opening a Codex thread", async () =>
   assert.equal(completion.response, "resultado local");
 });
 
+test("commitment capture runs locally without opening a Codex thread", async () => {
+  const api = apiFixture({ id: "capture-1", source: "personal-os-commitment-capture",
+    prompt: '{"card_id":"order"}' });
+  let codexJobs = 0;
+  const codex = { async listThreads() { return []; }, async runJob() { codexJobs += 1; } };
+  await runWorkerOnce({ api, codex, workerId: "mac",
+    commitmentCapture(job) {
+      assert.equal(job.id, "capture-1");
+      return { threadName: "Secretario personal", response: "Compromiso creado" };
+    },
+  });
+  assert.equal(codexJobs, 0);
+  assert.equal(api.calls.find(([name]) => name === "complete")[2].response,
+    "Compromiso creado");
+});
+
+test("commitment review records WhatsApp delivery without opening a Codex thread", async () => {
+  const api = apiFixture({ id: "review-1", source: "personal-os-commitment-review",
+    prompt: "{}" });
+  const receipts = [];
+  const codex = { async listThreads() { return []; }, async runJob() {
+    throw new Error("must not open Codex");
+  } };
+  await runWorkerOnce({ api, codex, workerId: "mac",
+    commitmentReview() {
+      return { threadName: "Secretario personal", response: "PUMA",
+        details: { kind: "commitment-review", alertIds: [7] } };
+    },
+    commitmentDelivery(result, delivery) { receipts.push({ result, delivery }); },
+  });
+  assert.equal(receipts.length, 1);
+  assert.equal(receipts[0].result.jobId, "review-1");
+  assert.equal(receipts[0].delivery.ok, true);
+});
+
 test("runWorkerOnce returns candidates when a selector is ambiguous", async () => {
   const api = apiFixture({ id: "job-2", prompt: "hola" });
   const codex = {

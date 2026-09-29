@@ -29,6 +29,22 @@ test("monthly prompt includes Norte Financiero as canonical source", () => {
   assert.match(prompt, /complete-cadence monthly_review/);
 });
 
+test("commitment review enqueues a local handler without choosing a Codex task", async () => {
+  const calls = [];
+  const client = { async enqueueJob(input) {
+    calls.push(input);
+    return { created: true, job: { id: "job-c", status: "queued" } };
+  } };
+  await runReview("commitments", {
+    client, now: new Date("2026-09-29T12:30:00Z"), output: () => {},
+  });
+  assert.equal(calls[0].source, "personal-os-commitment-review");
+  assert.equal(calls[0].thread, "recent");
+  assert.deepEqual(calls[0].reply,
+    { channel: "whatsapp-self", policy: "actionable-only" });
+  assert.equal(calls[0].idempotencyKey, "personal-os:commitments:2026-09-29");
+});
+
 test("runReview enqueues one idempotent writable job in the exact task", async () => {
   const calls = [];
   const client = {

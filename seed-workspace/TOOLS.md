@@ -39,6 +39,14 @@
   segunda respuesta asíncrona por WhatsApp y dejaría el turno actual sin la fuente.
   No la mandes a un task de Codex ni inventes una respuesta desde historial o
   memoria si la consulta falla.
+- Registro de compromisos: para compras, entregas, devoluciones, turnos,
+  procedimientos, reclamos o trámites materiales usá la herramienta nativa
+  `commitment_capture`. Requiere una identidad estable, `deadline_at` y
+  `next_check_at` ISO-8601 con zona horaria, además de responsable, estado,
+  próximo paso y condición de cierre. La operación es idempotente por identidad:
+  nunca inventes otra ficha para el mismo pedido/caso. Si la herramienta falla,
+  decilo; la falla queda visible en Personal OS. Esta herramienta sólo registra
+  seguimiento: no envía, compra, paga ni cierra el asunto.
 - Contador autónomo: los cron instalados por
   `POST /setup/api/crons/install-accountant` ejecutan
   `node /app/src/cron/dispatch-accountant.js --cadence <monitor|billing|payment>`

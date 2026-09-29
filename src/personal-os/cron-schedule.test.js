@@ -18,10 +18,11 @@ const opts = {
   outputMaxBytes: 4000,
 };
 
-test("personal OS schedules weekly Sunday and monthly day one reviews", () => {
+test("personal OS schedules one daily commitment review plus weekly and monthly reviews", () => {
   assert.deepEqual(
     PERSONAL_OS_CRON_JOBS.map(({ cadence, schedule }) => ({ cadence, schedule })),
     [
+      { cadence: "commitments", schedule: "30 9 * * *" },
       { cadence: "weekly", schedule: "30 18 * * 0" },
       { cadence: "monthly", schedule: "30 18 1 * *" },
     ],
@@ -47,7 +48,7 @@ test("personal OS cron activation requires the exact messaging contract", () => 
 });
 
 test("personal OS cron commands dispatch to Codex without OpenClaw delivery", () => {
-  const weekly = PERSONAL_OS_CRON_JOBS[0];
+  const weekly = PERSONAL_OS_CRON_JOBS[1];
   const created = personalOsCommandCreateArgs(weekly, opts);
   const edited = personalOsCommandEditArgs("job-1", weekly, opts);
 

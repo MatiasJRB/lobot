@@ -59,6 +59,8 @@ test("outbound hook distinguishes provider acceptance from uncertain and failed 
   assert.deepEqual(hooks, ["message_received", "message_sent"]);
   assert.equal(tools[0].tool, plugin.knowledgeTool);
   assert.deepEqual(tools[0].options, { name: "knowledge_search" });
+  assert.equal(tools[1].tool, plugin.commitmentTool);
+  assert.deepEqual(tools[1].options, { name: "commitment_capture" });
   const context = { channelId: "whatsapp", accountId: "default", conversationId: "chat-1" };
   const accepted = plugin.projectSent({ to: "chat-1", content: "hola",
     success: true, messageId: "provider-1" }, context);
@@ -104,4 +106,27 @@ test("owner-only knowledge tool waits for the local bridge result", async () => 
   assert.equal(body.source, "knowledge-hub-query");
   assert.equal(body.mode, "read-only");
   assert.equal(body.reply, undefined);
+});
+
+test("owner-only commitment tool queues a synchronous structured capture", async () => {
+  assert.equal(plugin.commitmentTool({ senderIsOwner: false }), null);
+  const calls = [];
+  const result = await plugin.captureCommitmentBridge({
+    card_id: "puma_return", identities: ["order_id:5401117575"],
+  }, "tool-commitment", {
+    baseUrl: "https://bridge.test", token: "private", wait: async () => {},
+    request: async (_base, _token, pathname, options) => {
+      calls.push([pathname, options]);
+      if (pathname === "/jobs") return { job: { id: "job-c" } };
+      return { job: { id: "job-c", status: "done", response: "Compromiso creado" } };
+    },
+  });
+  assert.equal(result, "Compromiso creado");
+  const job = JSON.parse(calls[0][1].body);
+  assert.equal(job.source, "personal-os-commitment-capture");
+  assert.equal(job.mode, "workspace-write");
+  assert.equal(job.reply, undefined);
+  const payload = JSON.parse(job.prompt);
+  assert.equal(payload.source_ref.startsWith("openclaw-tool:"), true);
+  assert.deepEqual(payload.channels, ["whatsapp-self"]);
 });

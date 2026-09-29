@@ -591,7 +591,10 @@ async function deliverCodexBridgeJob(job) {
   await ensureGatewayRunning();
   const label = job.threadName || job.threadId || "hilo elegido";
   const body = job.response || `No pude completar el pedido: ${job.error || "error desconocido"}`;
-  const message = `Codex · ${label}\n\n${body}`.slice(0, 3900);
+  const heading = job.source === "personal-os-commitment-review"
+    ? "Secretario personal"
+    : `Codex · ${label}`;
+  const message = `${heading}\n\n${body}`.slice(0, 3900);
   const result = await runCmd(
     OPENCLAW_NODE,
     clawArgs([

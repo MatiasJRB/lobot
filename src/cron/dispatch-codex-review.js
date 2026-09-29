@@ -26,10 +26,13 @@ export function localDateKey(now = new Date(), timeZone = PERSONAL_OS_TIMEZONE) 
 }
 
 export function buildReviewPrompt(cadence, now = new Date()) {
-  if (!["weekly", "monthly"].includes(cadence)) {
+  if (!["commitments", "weekly", "monthly"].includes(cadence)) {
     throw new Error(`Unsupported cadence: ${cadence}`);
   }
   const date = localDateKey(now);
+  if (cadence === "commitments") {
+    return JSON.stringify({ version: 1, review: "commitments", date });
+  }
   const isWeekly = cadence === "weekly";
   const cadenceId = isWeekly ? "weekly_review" : "monthly_review";
   const briefHorizonHours = isWeekly ? 168 : 744;
@@ -70,14 +73,15 @@ export async function runReview(
   } = {},
 ) {
   const date = localDateKey(now);
+  const isCommitmentReview = cadence === "commitments";
   const result = await client.enqueueJob({
     prompt: buildReviewPrompt(cadence, now),
-    thread: PERSONAL_OS_THREAD,
+    thread: isCommitmentReview ? "recent" : PERSONAL_OS_THREAD,
     cwd: PERSONAL_ORGANIZATION_DIR,
     mode: "workspace-write",
     idempotencyKey: `personal-os:${cadence}:${date}`,
-    source: "openclaw-cron",
-    reply: { channel: "whatsapp-self" },
+    source: isCommitmentReview ? "personal-os-commitment-review" : "openclaw-cron",
+    reply: { channel: "whatsapp-self", ...(isCommitmentReview ? { policy: "actionable-only" } : {}) },
   });
   const summary = {
     ok: true,

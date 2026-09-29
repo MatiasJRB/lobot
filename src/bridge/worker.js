@@ -11,6 +11,11 @@ import {
 import { pullPersonalOsEvents } from "./personal-os-events.js";
 import { pullPersonalOsNotices } from "./personal-os-notices.js";
 import { runKnowledgeQuery } from "./knowledge-query.js";
+import {
+  captureCommitmentJob,
+  recordCommitmentDelivery,
+  runCommitmentReview,
+} from "./commitment-cli.js";
 
 export const WORKER_VERSION = "0.1.0";
 const MAX_BUSY_ATTEMPTS = 12;
@@ -48,7 +53,9 @@ function selectorFailure(error) {
 }
 
 export async function runWorkerOnce({ api, codex, workerId, leaseMs = 35 * 60 * 1000,
-  knowledgeQuery = runKnowledgeQuery }) {
+  knowledgeQuery = runKnowledgeQuery, commitmentCapture = captureCommitmentJob,
+  commitmentReview = runCommitmentReview,
+  commitmentDelivery = recordCommitmentDelivery }) {
   if (typeof api.listPersonalOsNotices === "function") {
     try {
       await pullPersonalOsNotices(api);
@@ -78,12 +85,23 @@ export async function runWorkerOnce({ api, codex, workerId, leaseMs = 35 * 60 * 
   try {
     const result = job.source === "knowledge-hub-query"
       ? await knowledgeQuery(job)
-      : await codex.runJob(job, { timeoutMs: leaseMs - 60_000 });
+      : job.source === "personal-os-commitment-capture"
+        ? await commitmentCapture(job)
+        : job.source === "personal-os-commitment-review"
+          ? await commitmentReview(job)
+          : await codex.runJob(job, { timeoutMs: leaseMs - 60_000 });
     const completed = await api.completeJob(job.id, {
       workerId,
       status: "done",
       ...result,
     });
+    if (job.source === "personal-os-commitment-review") {
+      try {
+        await commitmentDelivery({ ...result, jobId: job.id }, completed.delivery);
+      } catch (error) {
+        console.error(`[codex-bridge] commitment delivery receipt failed: ${error.message}`);
+      }
+    }
     return { processed: true, job: completed.job, delivery: completed.delivery };
   } catch (error) {
     if (activeWriterConflict(error) && (job.attemptCount || 1) < MAX_BUSY_ATTEMPTS) {

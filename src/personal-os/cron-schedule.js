@@ -2,6 +2,11 @@ import path from "node:path";
 
 export const PERSONAL_OS_CRON_JOBS = [
   {
+    cadence: "commitments",
+    schedule: "30 9 * * *",
+    name: "Personal OS — compromisos y plazos",
+  },
+  {
     cadence: "weekly",
     schedule: "30 18 * * 0",
     name: "Personal OS — revisión semanal",
