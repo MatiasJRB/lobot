@@ -16,6 +16,14 @@ test("plugin manifest declares every registered owner-only tool", () => {
     ["commitment_capture", "knowledge_search"]);
 });
 
+test("workspace instructions include a synchronous knowledge fallback inline", () => {
+  const agents = fs.readFileSync(path.join(import.meta.dirname, "..", "..",
+    "seed-workspace", "AGENTS.md"), "utf8");
+  assert.match(agents, /codex-bridge\.js knowledge --query/);
+  assert.match(agents, /--wait --no-reply/);
+  assert.match(agents, /ni afirmes que consultaste el Hub/);
+});
+
 test("WhatsApp transport hook writes private, stable inbound facts", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "personal-os-events-"));
   const filename = path.join(dir, "events.ndjson");
