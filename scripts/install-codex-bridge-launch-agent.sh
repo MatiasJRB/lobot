@@ -28,14 +28,15 @@ fi
 mkdir -p "${HOME}/Library/LaunchAgents" "$LOG_DIR" "$INSTALL_DIR"
 chmod 600 "$ENV_FILE"
 cp "${REPO_DIR}/scripts/run-codex-bridge-worker.sh" "$RUNNER"
-cp "${REPO_DIR}/src/bridge/worker.js" "${INSTALL_DIR}/worker.js"
-cp "${REPO_DIR}/src/bridge/api-client.js" "${INSTALL_DIR}/api-client.js"
-cp "${REPO_DIR}/src/bridge/app-server-client.js" "${INSTALL_DIR}/app-server-client.js"
+for module in worker api-client app-server-client commitment-cli knowledge-query \
+  personal-os-events personal-os-notices; do
+  cp "${REPO_DIR}/src/bridge/${module}.js" "${INSTALL_DIR}/${module}.js"
+done
 cat > "${INSTALL_DIR}/package.json" <<'JSON'
 {"private":true,"type":"module"}
 JSON
 chmod 755 "$RUNNER" "${INSTALL_DIR}/worker.js"
-chmod 644 "${INSTALL_DIR}/api-client.js" "${INSTALL_DIR}/app-server-client.js" "${INSTALL_DIR}/package.json"
+chmod 644 "${INSTALL_DIR}"/*.js "${INSTALL_DIR}/package.json"
 
 cat > "$PLIST" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

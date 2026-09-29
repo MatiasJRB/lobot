@@ -51,7 +51,8 @@ test("runWorkerOnce publishes threads and completes a claimed job", async () => 
   };
   const result = await runWorkerOnce({ api, codex, workerId: "mac" });
   assert.equal(result.processed, true);
-  assert.equal(api.calls[0][0], "heartbeat");
+  assert.equal(api.calls[0][0], "claim");
+  assert.equal(api.calls[1][0], "heartbeat");
   assert.equal(api.calls[2][2].status, "done");
   assert.equal(api.calls[2][2].response, "respuesta");
 });

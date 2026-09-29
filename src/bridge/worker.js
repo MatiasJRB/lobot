@@ -71,15 +71,20 @@ export async function runWorkerOnce({ api, codex, workerId, leaseMs = 35 * 60 * 
   } catch (error) {
     console.error(`[codex-bridge] Personal OS event pull failed: ${error.message}`);
   }
-  const threads = await codex.listThreads({ limit: 100 });
+  const { job } = await api.claimJob(workerId, leaseMs);
+  const localOnly = job && ["knowledge-hub-query", "personal-os-commitment-capture",
+    "personal-os-commitment-review"].includes(job.source);
+  let threads = [];
+  if (!localOnly) {
+    if (typeof codex.start === "function") await codex.start();
+    threads = await codex.listThreads({ limit: 100 });
+  }
   await api.heartbeat({
     workerId,
     version: WORKER_VERSION,
     host: os.hostname(),
     threads: summarizeThreads(threads),
   });
-
-  const { job } = await api.claimJob(workerId, leaseMs);
   if (!job) return { processed: false };
 
   try {
@@ -131,7 +136,6 @@ export async function runWorkerOnce({ api, codex, workerId, leaseMs = 35 * 60 * 
 export async function runWorker({ api, codex, workerId, pollMs = 5_000, once = false }) {
   do {
     try {
-      await codex.start();
       const result = await runWorkerOnce({ api, codex, workerId });
       if (result.processed) {
         // Resuming a Codex thread gives this app-server process its writer lock.
