@@ -61,6 +61,38 @@ test("notices use a separate write-only token, durable feed and idempotency", as
     { headers: { authorization: "Bearer notice-only" } })).status, 401);
 });
 
+test("authorized systems can enqueue a write-only idempotent commitment capture", async (t) => {
+  const f = await fixture();
+  t.after(() => f.server.close());
+  const commitment = {
+    card_id: "puma_return", title: "Devolución PUMA", domain: "shopping",
+    outcome: "Recibir reintegro", status: "ready_for_secretary", priority: "high",
+    owner: "secretario", current_state: "Formulario preparado", next_action: "Enviar fotos",
+    next_check_at: "2026-09-29T09:30:00-03:00",
+    closure_condition: "Retiro y reintegro confirmados", source_ref: "system:event-1",
+    material_kind: "return", progress_state: "prepared",
+    deadline_at: "2026-10-23T23:59:00-03:00", identities: ["order_id:5401117575"],
+  };
+  const post = (body, token = "notice-only") => fetch(`${f.url}/personal-os/commitments`, {
+    method: "POST", headers: { authorization: `Bearer ${token}`,
+      "content-type": "application/json" }, body: JSON.stringify(body),
+  });
+  assert.equal((await post({ idempotencyKey: "event-1", commitment }, "test-token")).status, 401);
+  const first = await post({ idempotencyKey: "event-1", commitment });
+  const second = await post({ idempotencyKey: "event-1", commitment });
+  assert.equal(first.status, 202);
+  assert.equal(second.status, 200);
+  const body = await first.json();
+  const job = f.store.getJob(body.jobId);
+  assert.equal(job.source, "personal-os-commitment-capture");
+  assert.equal(JSON.parse(job.prompt).card_id, "puma_return");
+  assert.equal(job.reply, null);
+  assert.equal((await post({ idempotencyKey: "event-2",
+    commitment: { ...commitment, deadline_at: "2026-10-23" } })).status, 400);
+  assert.equal((await fetch(`${f.url}/jobs`,
+    { headers: { authorization: "Bearer notice-only" } })).status, 401);
+});
+
 test("bridge routes reject missing or invalid bearer tokens", async (t) => {
   const f = await fixture();
   t.after(() => f.server.close());

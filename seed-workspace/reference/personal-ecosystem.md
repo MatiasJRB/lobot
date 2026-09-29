@@ -36,3 +36,17 @@
 - No archivar/borrar mails.
 - No aceptar/cancelar eventos.
 - No mutar GitHub salvo instrucción explícita.
+
+## Interfaz para compromisos de otros sistemas
+
+Los sistemas autorizados pueden registrar un compromiso sin abrir un chat de
+Codex mediante `POST /bridge/api/personal-os/commitments`, autenticado con el
+token write-only `PERSONAL_OS_NOTICE_TOKEN`. El cuerpo lleva:
+
+- `idempotencyKey`: identidad estable del evento de origen.
+- `commitment`: el contrato completo de `commitment_capture` (incluye identidad
+  de negocio, responsable, estado, próximo paso, `next_check_at`, condición de
+  cierre y `deadline_at`, ambos con zona horaria).
+
+La respuesta sólo confirma `jobId` y si se creó; el token no permite leer fichas,
+jobs ni eventos. La Mac ejecuta la captura local y deduplica por identidad.

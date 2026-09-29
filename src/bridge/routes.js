@@ -12,6 +12,41 @@ function secureEqual(actual, expected) {
   );
 }
 
+const COMMITMENT_REQUIRED = ["card_id", "title", "domain", "outcome", "status",
+  "priority", "owner", "current_state", "next_action", "next_check_at",
+  "closure_condition", "source_ref", "material_kind", "progress_state",
+  "deadline_at", "identities"];
+
+function validZonedDate(value) {
+  return typeof value === "string" && /(?:Z|[+-]\d\d:\d\d)$/.test(value) &&
+    !Number.isNaN(Date.parse(value));
+}
+
+export function validateCommitmentIntake(body) {
+  if (!body || typeof body !== "object" || !body.commitment ||
+      typeof body.commitment !== "object") return "commitment is required";
+  if (typeof body.idempotencyKey !== "string" || !body.idempotencyKey.trim() ||
+      body.idempotencyKey.length > 300) return "idempotencyKey is required (<=300 characters)";
+  const commitment = body.commitment;
+  for (const field of COMMITMENT_REQUIRED) {
+    if (field === "identities") continue;
+    if (typeof commitment[field] !== "string" || !commitment[field].trim()) {
+      return `${field} is required`;
+    }
+  }
+  if (!/^[a-z0-9][a-z0-9_-]{1,199}$/.test(commitment.card_id)) return "invalid card_id";
+  if (!validZonedDate(commitment.next_check_at) || !validZonedDate(commitment.deadline_at)) {
+    return "next_check_at and deadline_at must be zoned ISO-8601 datetimes";
+  }
+  if (!Array.isArray(commitment.identities) || !commitment.identities.length ||
+      commitment.identities.length > 10 || commitment.identities.some((value) =>
+        typeof value !== "string" || value.length > 500 || !value.includes(":"))) {
+    return "identities must contain 1-10 TYPE:VALUE strings";
+  }
+  if (Buffer.byteLength(JSON.stringify(commitment)) > 20_000) return "commitment is too large";
+  return null;
+}
+
 export function bearerAuth(token) {
   return function requireBridgeAuth(req, res, next) {
     if (!token) {
@@ -40,6 +75,23 @@ export function createBridgeRouter({ store, token, deliverJob = null,
     } catch (error) {
       return res.status(error instanceof TypeError ? 400 : 503)
         .json({ ok: false, error: error instanceof TypeError ? error.message : "Notice outbox unavailable" });
+    }
+  });
+  router.post("/personal-os/commitments", bearerAuth(noticeWriteToken), (req, res) => {
+    const error = validateCommitmentIntake(req.body);
+    if (error) return res.status(400).json({ ok: false, error });
+    try {
+      const result = store.enqueue({
+        prompt: JSON.stringify(req.body.commitment),
+        thread: "recent",
+        mode: "workspace-write",
+        idempotencyKey: `commitment-ingest:${req.body.idempotencyKey.trim()}`,
+        source: "personal-os-commitment-capture",
+      });
+      return res.status(result.created ? 202 : 200).json({ ok: true,
+        jobId: result.job.id, created: result.created });
+    } catch (queueError) {
+      return res.status(400).json({ ok: false, error: queueError.message });
     }
   });
   router.use(bearerAuth(token));
