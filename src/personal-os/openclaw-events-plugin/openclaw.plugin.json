@@ -1,9 +1,9 @@
 {
   "id": "personal-os-events",
   "name": "Personal OS event outbox",
-  "description": "Private OpenClaw event capture and owner-only Knowledge Hub queries",
+  "description": "Private OpenClaw event capture plus owner-only Knowledge Hub and commitment tools",
   "contracts": {
-    "tools": ["knowledge_search"]
+    "tools": ["knowledge_search", "commitment_capture"]
   },
   "configSchema": {"type":"object","additionalProperties":false,"properties":{}}
 }

@@ -9,6 +9,13 @@ import { readOpenclawEventPage } from "./openclaw-event-outbox.js";
 const require = createRequire(import.meta.url);
 const plugin = require("./openclaw-events-plugin/index.cjs");
 
+test("plugin manifest declares every registered owner-only tool", () => {
+  const manifest = JSON.parse(fs.readFileSync(
+    path.join(import.meta.dirname, "openclaw-events-plugin", "openclaw.plugin.json"), "utf8"));
+  assert.deepEqual(manifest.contracts.tools.sort(),
+    ["commitment_capture", "knowledge_search"]);
+});
+
 test("WhatsApp transport hook writes private, stable inbound facts", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "personal-os-events-"));
   const filename = path.join(dir, "events.ndjson");
