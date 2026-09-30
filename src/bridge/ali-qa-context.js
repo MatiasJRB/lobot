@@ -4,9 +4,31 @@ import { sanitizeAliGroupText } from "./ali-group.js";
 const REPO = "MatiasJRB/asiento-libre";
 const ISSUE_URL = "https://github.com/MatiasJRB/asiento-libre/issues/";
 const MAX_ISSUES = 4;
+const GH_ACCOUNT = "MatiasJRB";
 
-function ghJson(args, { cwd, exec = execFileSync } = {}) {
-  const output = exec("gh", args, { cwd, encoding: "utf8", timeout: 12_000,
+function aliGhEnv({ cwd, env, exec }) {
+  // Other chats may switch gh's active account. Never switch it globally or
+  // fall back to its ambient token for Asiento Libre evidence.
+  const isolated = { ...env, GH_HOST: "github.com" };
+  for (const key of ["GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"]) {
+    delete isolated[key];
+  }
+  const token = String(exec("gh", ["auth", "token", "--hostname", "github.com",
+    "--user", GH_ACCOUNT], { cwd, env: isolated, encoding: "utf8", timeout: 5_000,
+    maxBuffer: 10_000, stdio: ["ignore", "pipe", "ignore"] })).trim();
+  if (!token || /\s/.test(token)) throw new Error("ALI GitHub credential unavailable");
+  const ghEnv = { ...isolated, GH_TOKEN: token };
+  const login = String(exec("gh", ["api", "user", "--hostname", "github.com", "--jq", ".login"],
+    { cwd, env: ghEnv, encoding: "utf8", timeout: 12_000,
+      maxBuffer: 10_000, stdio: ["ignore", "pipe", "ignore"] })).trim();
+  if (login.toLowerCase() !== GH_ACCOUNT.toLowerCase()) {
+    throw new Error("ALI GitHub credential identity mismatch");
+  }
+  return ghEnv;
+}
+
+function ghJson(args, { cwd, env, exec = execFileSync } = {}) {
+  const output = exec("gh", args, { cwd, env, encoding: "utf8", timeout: 12_000,
     maxBuffer: 2_000_000, stdio: ["ignore", "pipe", "ignore"] });
   return JSON.parse(output);
 }
@@ -48,10 +70,13 @@ export async function collectAliQaContext(prompt, { cwd, exec = execFileSync,
   let question = String(prompt);
   try { question = JSON.parse(prompt).body || question; } catch { /* Already plain text. */ }
   const issueNumbers = relevantIssueNumbers(prompt);
+  let ghEnv = null;
+  try { ghEnv = aliGhEnv({ cwd, env, exec }); } catch { /* Fail closed, no ambient fallback. */ }
   const issues = issueNumbers.map((number) => {
     try {
+      if (!ghEnv) throw new Error("ALI GitHub identity unavailable");
       const data = ghJson(["issue", "view", String(number), "--repo", REPO,
-        "--json", "number,title,state,body,url,updatedAt,labels,comments"], { cwd, exec });
+        "--json", "number,title,state,body,url,updatedAt,labels,comments"], { cwd, env: ghEnv, exec });
       return { number, title: data.title, state: data.state, url: data.url,
         updatedAt: data.updatedAt, body: String(data.body || "").slice(0, 3500),
         labels: (data.labels || []).map((label) => label.name).slice(0, 10),
@@ -62,8 +87,9 @@ export async function collectAliQaContext(prompt, { cwd, exec = execFileSync,
   });
   let project = { url: "https://github.com/orgs/MatiasJRB/projects/4", unavailable: true };
   try {
+    if (!ghEnv) throw new Error("ALI GitHub identity unavailable");
     const data = ghJson(["project", "item-list", "4", "--owner", "MatiasJRB",
-      "--format", "json", "--limit", "300"], { cwd, exec });
+      "--format", "json", "--limit", "300"], { cwd, env: ghEnv, exec });
     project = { url: project.url, items: (data.items || []).filter((item) =>
       issueNumbers.some((number) => item.content?.number === number))
       .map((item) => ({ number: item.content?.number,

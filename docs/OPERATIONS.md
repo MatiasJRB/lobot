@@ -298,7 +298,12 @@ La ejecución del grupo usa proceso Codex separado con entorno allowlist (sin
 tokens Bridge/GitHub/MP), `approvalPolicy=never`, sandbox `readOnly` sin red y
 checkout ALI fijo. Antes de consultar al modelo, el worker obtiene issues QA
 #463/#490, refs de issues mencionadas y estado del GitHub Project #4 mediante
-comandos `gh issue view` y `gh project item-list` de lectura. También consulta
+comandos `gh issue view` y `gh project item-list` de lectura. Para esas lecturas
+resuelve la credencial existente de `github.com` del usuario **MatiasJRB**, verifica
+su identidad vía `gh api user` y la pasa sólo a esos subprocesses. Nunca cambia
+la cuenta global activa de `gh`, nunca usa como fallback el token ambiental de
+otra cuenta y nunca pasa esta credencial al modelo. Si falta la credencial o la
+identidad no coincide, marca GitHub/Project como indisponibles. También consulta
 `engram search --project asiento-libre --limit 3` desde el worker; sus notas son
 históricas, nunca evidencia del estado actual. Si una fuente no responde, se
 marca indisponible; no se inventa estado. Si el mensaje nombra un `pago MP`
@@ -346,6 +351,28 @@ observó respuesta grupal ni recibo de envío. Se apagaron ambos flags y se
 verificó otra vez `groupPolicy=disabled` en raíz/cuenta. El hook ahora reconoce
 el JID exacto mediante la clave de sesión de grupo **y** `isGroup=true`; aún
 requiere una nueva validación real autorizada antes de reactivar producción.
+
+Validación real posterior 2026-09-30 (Joaquín avisado antes de los mensajes):
+- QA 3/7, 04:27 UTC: `exactGroup=true`, `sessionGroup=true`; job
+  `e78ead8a-b76a-4dcf-922f-268afbd6cdac` completado con respuesta apagada y
+  supresión permanente, sin salida grupal.
+- QA 4/7, 12:51 UTC: job `2a1bb124-abbc-4137-af2d-51daf5911948` completado;
+  una respuesta `🤖 Ali:` entregada a las 12:52:23 UTC. GitHub/Project figuraban
+  indisponibles porque el lector heredó la cuenta ambiental de otra línea.
+  Se corrigió fijando la identidad MatiasJRB sólo para el lector, sin cambiar
+  la cuenta global ni pasar credenciales al modelo, y se reinstaló el worker.
+- QA 5/7, 13:09 UTC: job `80a1ed6b-5f94-478e-befb-2c479fea77b6` completado;
+  una respuesta entregada a las 13:10:00 UTC con lectura actual de GitHub y
+  Project (#463 OPEN/QA Running, #490 OPEN/Blocked), separada de memoria
+  histórica. No verificó ni modificó pagos, Supabase o producción.
+
+La captura y salida del puente quedaron verificadas con ambos flags encendidos,
+un solo grupo exacto y el worker instalado. La continuidad física es distinta:
+macOS registró `Clamshell Sleep` aun con alimentación AC y `caffeinate`; las
+pruebas exitosas posteriores fueron con Mac accesible/tapa abierta. No se
+desactivó el bloqueo de seguridad ni se validó funcionamiento con tapa cerrada.
+El hilo fijado **Estación híbrida Mac + PC** lleva esa investigación; no tratar
+esta validación del puente como una solución de suspensión o continuidad 24/7.
 
 Calendar write opcional:
 
