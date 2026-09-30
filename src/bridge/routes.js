@@ -2,6 +2,8 @@ import crypto from "node:crypto";
 import express from "express";
 import { DEFAULT_OPENCLAW_EVENT_OUTBOX, readOpenclawEventPage } from "../personal-os/openclaw-event-outbox.js";
 import { DEFAULT_NOTICE_OUTBOX, appendNotice, readNoticePage } from "./notice-outbox.js";
+import { ALI_GROUP_SOURCE, ALI_GROUP_REPLY_CHANNEL, buildAliGroupJobInput,
+  validateAliGroupAnswer } from "./ali-group.js";
 
 function secureEqual(actual, expected) {
   const actualBuffer = Buffer.from(actual || "");
@@ -63,7 +65,9 @@ export function bearerAuth(token) {
 
 export function createBridgeRouter({ store, token, deliverJob = null,
   openclawEventOutbox = DEFAULT_OPENCLAW_EVENT_OUTBOX,
-  noticeOutbox = DEFAULT_NOTICE_OUTBOX, noticeWriteToken = "" }) {
+  noticeOutbox = DEFAULT_NOTICE_OUTBOX, noticeWriteToken = "",
+  aliGroupJid = "", aliGroupIntakeEnabled = false,
+  aliGroupReplyEnabled = false }) {
   const router = express.Router();
   // Producer credential is write-only: it cannot inspect cards, events, jobs or threads.
   router.post("/personal-os/notices", bearerAuth(noticeWriteToken), (req, res) => {
@@ -95,6 +99,25 @@ export function createBridgeRouter({ store, token, deliverJob = null,
     }
   });
   router.use(bearerAuth(token));
+
+  router.post("/ali-group/mentions", (req, res) => {
+    if (!aliGroupIntakeEnabled) return res.status(503).json({ ok: false,
+      error: "ALI group intake is disabled" });
+    try {
+      const input = buildAliGroupJobInput(req.body, { groupJid: aliGroupJid });
+      if (store.countRecentSource(ALI_GROUP_SOURCE, Date.now() - 60 * 60_000) >= 12 &&
+          !store.hasIdempotencyKey(input.idempotencyKey)) {
+        return res.status(429).json({ ok: false, error: "ALI group hourly limit reached" });
+      }
+      const result = store.enqueue(input, { trustedAliGroup: true });
+      res.set("Cache-Control", "no-store");
+      return res.status(result.created ? 202 : 200).json({ ok: true,
+        jobId: result.job.id, created: result.created });
+    } catch (error) {
+      return res.status(error instanceof TypeError ? 400 : 503)
+        .json({ ok: false, error: "Invalid ALI group mention" });
+    }
+  });
 
   router.get("/personal-os/notices", (req, res) => {
     try {
@@ -156,7 +179,8 @@ export function createBridgeRouter({ store, token, deliverJob = null,
     try {
       let job = store.complete(req.params.jobId, req.body?.workerId, req.body || {});
       if (!job) return res.status(404).json({ ok: false, error: "Job not found" });
-      const delivery = await attemptDelivery(job, store, deliverJob);
+      const delivery = await attemptDelivery(job, store, deliverJob,
+        { aliGroupJid, aliGroupReplyEnabled });
       if (delivery.ok) job = store.getJob(job.id);
       return res.json({ ok: true, job, delivery });
     } catch (error) {
@@ -182,7 +206,8 @@ export function createBridgeRouter({ store, token, deliverJob = null,
   router.post("/jobs/:jobId/deliver", async (req, res) => {
     const job = store.getJob(req.params.jobId);
     if (!job) return res.status(404).json({ ok: false, error: "Job not found" });
-    const delivery = await attemptDelivery(job, store, deliverJob);
+    const delivery = await attemptDelivery(job, store, deliverJob,
+      { aliGroupJid, aliGroupReplyEnabled });
     return res.status(delivery.ok ? 200 : 502).json({
       ok: delivery.ok,
       job: store.getJob(job.id),
@@ -209,9 +234,39 @@ export function createBridgeRouter({ store, token, deliverJob = null,
   return router;
 }
 
-async function attemptDelivery(job, store, deliverJob) {
+async function attemptDelivery(job, store, deliverJob, { aliGroupJid,
+  aliGroupReplyEnabled } = {}) {
   if (!job.reply || job.deliveredAt) {
     return { ok: true, attempted: false, reason: job.deliveredAt ? "already-delivered" : "not-requested" };
+  }
+  if (job.source === ALI_GROUP_SOURCE || job.reply?.channel === ALI_GROUP_REPLY_CHANNEL) {
+    if (job.source !== ALI_GROUP_SOURCE || job.reply?.channel !== ALI_GROUP_REPLY_CHANNEL ||
+        job.reply.conversationId !== aliGroupJid) {
+      return { ok: false, attempted: false, error: "ALI group target mismatch" };
+    }
+    if (job.status !== "done") return { ok: false, attempted: false, error: "ALI group job not done" };
+    if (job.groupReplySuppressedAt) return { ok: true, attempted: false,
+      reason: "group-reply-suppressed" };
+    if (!aliGroupReplyEnabled) {
+      store.markGroupReplySuppressed(job.id);
+      return { ok: true, attempted: false, reason: "group-replies-disabled" };
+    }
+    if (Date.now() - Date.parse(job.createdAt) > 30 * 60_000) {
+      store.markGroupReplySuppressed(job.id);
+      return { ok: true, attempted: false, reason: "stale-group-reply-suppressed" };
+    }
+    try { validateAliGroupAnswer(job.response); }
+    catch { return { ok: false, attempted: false, error: "ALI group answer rejected" }; }
+    if (!deliverJob) return { ok: false, attempted: false, error: "Delivery is not configured" };
+    const claimed = store.markDeliveryAttempted(job.id);
+    if (!claimed) return { ok: false, attempted: false, error: "ALI group delivery already attempted" };
+    try {
+      await deliverJob(claimed);
+      store.markDelivered(job.id);
+      return { ok: true, attempted: true };
+    } catch {
+      return { ok: false, attempted: true, error: "ALI group delivery failed; manual review required" };
+    }
   }
   if (
     job.reply.policy === "actionable-only" &&

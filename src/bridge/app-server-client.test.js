@@ -124,3 +124,42 @@ test("a recycled app-server that exits late does not orphan its replacement", as
   client.stop();
   assert.equal(second.killedWith, "SIGTERM");
 });
+
+test("ALI QA runner pins thread, read-only sandbox and no network without personal prompt", async () => {
+  const client = new CodexAppServerClient();
+  const calls = [];
+  const threadId = "0199abcd-aaaa-bbbb-cccc-123456789012";
+  client.request = async (method, params) => {
+    calls.push({ method, params });
+    if (method === "thread/resume") return { thread: { id: threadId } };
+    if (method === "turn/start") return { turn: { id: "turn-1" } };
+    throw new Error(method);
+  };
+  client.waitForTurn = async () => ({ status: "completed", items: [
+    { type: "agentMessage", phase: "final_answer", text: "Usá tarjeta TEST." },
+  ] });
+  const result = await client.runAliQaJob({ id: "job-1", source: "ali-group-mention",
+    mode: "read-only", reply: { channel: "whatsapp-ali-group" },
+    prompt: '{"body":"@lobot cómo pruebo débito?"}' },
+  { threadId, cwd: "/ali", context: { issues: [{ number: 463 }] } });
+  assert.equal(result.response, "Usá tarjeta TEST.");
+  assert.equal(calls[0].params.threadId, threadId);
+  assert.equal(calls[0].params.approvalPolicy, "never");
+  assert.deepEqual(calls[1].params.sandboxPolicy, { type: "readOnly", networkAccess: false });
+  assert.doesNotMatch(calls[1].params.input[0].text, /Secretario Personal/);
+  await assert.rejects(() => client.runJob({ source: "ali-group-mention" }), /dedicated runner/);
+});
+
+test("ALI QA suppresses any response if a tool slips into an isolated turn", async () => {
+  const client = new CodexAppServerClient();
+  const threadId = "0199abcd-aaaa-bbbb-cccc-123456789012";
+  client.request = async (method) => method === "thread/resume"
+    ? { thread: { id: threadId } } : { turn: { id: "turn-1" } };
+  client.waitForTurn = async () => ({ status: "completed", items: [
+    { type: "mcpToolCall", server: "engram", tool: "mem_save" },
+    { type: "agentMessage", phase: "final_answer", text: "No enviar" },
+  ] });
+  await assert.rejects(() => client.runAliQaJob({ id: "job-1", source: "ali-group-mention",
+    mode: "read-only", reply: { channel: "whatsapp-ali-group" }, prompt: '{"body":"@lobot"}' },
+  { threadId, cwd: "/ali", context: {} }), /tool use detected/);
+});

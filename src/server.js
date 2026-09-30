@@ -12,6 +12,7 @@ import { WebSocketServer } from "ws";
 
 import { createBridgeRouter } from "./bridge/routes.js";
 import { BridgeStore, resolveBridgeStatePath } from "./bridge/store.js";
+import { aliGroupConfigUpdates, aliGroupDeliveryMessage } from "./bridge/ali-group-runtime.js";
 import {
   ACCOUNTANT_CRON_JOBS,
   accountantCommandCreateArgs,
@@ -369,6 +370,20 @@ async function syncGatewayRuntimeConfig() {
     }
     console.log("[personal-os-events] OpenClaw WhatsApp hook and private plugin configured");
   }
+
+  const aliGroupJid = envValue("ALI_GROUP_JID");
+  if (aliGroupJid) {
+    const current = JSON.parse(fs.readFileSync(configPath(), "utf8"));
+    const updates = aliGroupConfigUpdates(current, { groupJid: aliGroupJid,
+      enabled: boolFromEnv("ALI_GROUP_MENTIONS_ENABLED") });
+    for (const [key, value] of updates) {
+      const result = await runCmd(OPENCLAW_NODE, clawArgs([
+        "config", "set", "--json", key, JSON.stringify(value),
+      ]));
+      if (result.code !== 0) throw new Error(`ALI group config failed at ${key}`);
+    }
+    console.log(`[ali-qa] exact group inbound ${boolFromEnv("ALI_GROUP_MENTIONS_ENABLED") ? "enabled" : "disabled"}`);
+  }
 }
 
 let gatewayProc = null;
@@ -586,6 +601,20 @@ app.disable("x-powered-by");
 app.use(express.json({ limit: "1mb" }));
 
 async function deliverCodexBridgeJob(job) {
+  if (job.source === "ali-group-mention" || job.reply?.channel === "whatsapp-ali-group") {
+    const target = envValue("ALI_GROUP_JID");
+    const message = aliGroupDeliveryMessage(job, { groupJid: target,
+      replyEnabled: boolFromEnv("ALI_GROUP_REPLY_ENABLED") });
+    await ensureGatewayRunning();
+    const result = await runCmd(OPENCLAW_NODE, clawArgs([
+      "message", "send", "--channel", "whatsapp", "--account", "default",
+      "--target", target, "--message", message, "--json",
+    ]), { secrets: [target, message] });
+    const receipt = projectExactWhatsAppDelivery({ code: result.code,
+      raw: parseJsonFromCommandOutput(result.output) }, { target, message });
+    if (!receipt.ok) throw new Error("OpenClaw ALI group delivery not confirmed");
+    return;
+  }
   const target = envValue("WHATSAPP_PERSONAL_TARGET");
   if (!target) throw new Error("WHATSAPP_PERSONAL_TARGET is not configured");
   await ensureGatewayRunning();
@@ -754,6 +783,9 @@ app.use(
     token: CODEX_BRIDGE_TOKEN,
     noticeWriteToken: PERSONAL_OS_NOTICE_TOKEN,
     deliverJob: deliverCodexBridgeJob,
+    aliGroupJid: envValue("ALI_GROUP_JID"),
+    aliGroupIntakeEnabled: boolFromEnv("ALI_GROUP_MENTIONS_ENABLED"),
+    aliGroupReplyEnabled: boolFromEnv("ALI_GROUP_REPLY_ENABLED"),
   }),
 );
 

@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
 import os from "node:os";
+import fs from "node:fs";
+import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { BridgeApiClient } from "./api-client.js";
@@ -11,6 +13,8 @@ import {
 import { pullPersonalOsEvents } from "./personal-os-events.js";
 import { pullPersonalOsNotices } from "./personal-os-notices.js";
 import { runKnowledgeQuery } from "./knowledge-query.js";
+import { collectAliQaContext } from "./ali-qa-context.js";
+import { ALI_GROUP_SOURCE, ALI_QA_CODEX_CONFIG } from "./ali-group.js";
 import {
   captureCommitmentJob,
   recordCommitmentDelivery,
@@ -33,6 +37,24 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+export function aliQaChildEnv(env = process.env) {
+  const allowed = ["HOME", "PATH", "USER", "LOGNAME", "SHELL", "LANG", "LC_ALL",
+    "TMPDIR"];
+  return { ...Object.fromEntries(allowed.filter((name) => env[name])
+    .map((name) => [name, env[name]])),
+  ...(env.ALI_GROUP_CODEX_HOME ? { CODEX_HOME: env.ALI_GROUP_CODEX_HOME } : {}) };
+}
+
+export function assertAliQaHome(home) {
+  if (!home || !fs.statSync(home, { throwIfNoEntry: false })?.isDirectory() ||
+      !fs.statSync(path.join(home, "auth.json"), { throwIfNoEntry: false })?.isFile()) {
+    throw new Error("ALI QA isolated Codex home is not provisioned");
+  }
+  if (fs.readFileSync(path.join(home, "config.toml"), "utf8") !== ALI_QA_CODEX_CONFIG) {
+    throw new Error("ALI QA isolated Codex config is unsafe");
+  }
+}
+
 export function summarizeThreads(threads) {
   return threads.map((thread) => ({
     id: thread.id,
@@ -53,26 +75,33 @@ function selectorFailure(error) {
 }
 
 export async function runWorkerOnce({ api, codex, workerId, leaseMs = 35 * 60 * 1000,
+  qaCodex = null, aliContext = collectAliQaContext,
+  aliThreadId = process.env.ALI_GROUP_CODEX_THREAD_ID,
+  aliRepoCwd = process.env.ALI_GROUP_REPO_CWD,
+  aliCodexHome = process.env.ALI_GROUP_CODEX_HOME,
+  personalOsSync = true,
   knowledgeQuery = runKnowledgeQuery, commitmentCapture = captureCommitmentJob,
   commitmentReview = runCommitmentReview,
   commitmentDelivery = recordCommitmentDelivery }) {
-  if (typeof api.listPersonalOsNotices === "function") {
+  if (personalOsSync && typeof api.listPersonalOsNotices === "function") {
     try {
       await pullPersonalOsNotices(api);
     } catch (error) {
       console.error(`[codex-bridge] Personal OS notice pull failed: ${error.message}`);
     }
   }
-  try {
-    const pulled = await pullPersonalOsEvents(api);
-    if (pulled.quarantined) {
-      console.error(`[codex-bridge] quarantined ${pulled.quarantined} invalid OpenClaw events`);
+  if (personalOsSync) {
+    try {
+      const pulled = await pullPersonalOsEvents(api);
+      if (pulled.quarantined) {
+        console.error(`[codex-bridge] quarantined ${pulled.quarantined} invalid OpenClaw events`);
+      }
+    } catch (error) {
+      console.error(`[codex-bridge] Personal OS event pull failed: ${error.message}`);
     }
-  } catch (error) {
-    console.error(`[codex-bridge] Personal OS event pull failed: ${error.message}`);
   }
   const { job } = await api.claimJob(workerId, leaseMs);
-  const localOnly = job && ["knowledge-hub-query", "personal-os-commitment-capture",
+  const localOnly = job && [ALI_GROUP_SOURCE, "knowledge-hub-query", "personal-os-commitment-capture",
     "personal-os-commitment-review"].includes(job.source);
   let threads = [];
   if (!localOnly) {
@@ -92,8 +121,18 @@ export async function runWorkerOnce({ api, codex, workerId, leaseMs = 35 * 60 * 
       ? await knowledgeQuery(job)
       : job.source === "personal-os-commitment-capture"
         ? await commitmentCapture(job)
-        : job.source === "personal-os-commitment-review"
+      : job.source === "personal-os-commitment-review"
           ? await commitmentReview(job)
+          : job.source === ALI_GROUP_SOURCE
+            ? await (async () => {
+                if (!qaCodex || !aliThreadId || !aliRepoCwd)
+                  throw new Error("ALI QA dedicated runner is not configured");
+                assertAliQaHome(aliCodexHome);
+                const context = await aliContext(job.prompt, { cwd: aliRepoCwd });
+                await qaCodex.start();
+                return qaCodex.runAliQaJob(job, { threadId: aliThreadId,
+                  cwd: aliRepoCwd, context, timeoutMs: leaseMs - 60_000 });
+              })()
           : await codex.runJob(job, { timeoutMs: leaseMs - 60_000 });
     const completed = await api.completeJob(job.id, {
       workerId,
@@ -133,16 +172,18 @@ export async function runWorkerOnce({ api, codex, workerId, leaseMs = 35 * 60 * 
   }
 }
 
-export async function runWorker({ api, codex, workerId, pollMs = 5_000, once = false }) {
+export async function runWorker({ api, codex, qaCodex = null, workerId,
+  pollMs = 5_000, once = false }) {
   do {
     try {
-      const result = await runWorkerOnce({ api, codex, workerId });
+      const result = await runWorkerOnce({ api, codex, qaCodex, workerId });
       if (result.processed) {
         // Resuming a Codex thread gives this app-server process its writer lock.
         // The app-server keeps that lock until the process exits, even after the
         // turn completes, so recycle it after every claimed job. Otherwise a
         // WhatsApp dispatch can leave the pinned desktop task unusable forever.
         codex.stop();
+        qaCodex?.stop();
       } else if (!once) {
         await sleep(pollMs);
       }
@@ -150,6 +191,7 @@ export async function runWorker({ api, codex, workerId, pollMs = 5_000, once = f
       // A timed-out/failed turn can retain the same writer lock. Always discard
       // the client before retrying so the next loop starts with a clean server.
       codex.stop();
+      qaCodex?.stop();
       console.error(`[codex-bridge] ${error.message}`);
       if (!once) await sleep(Math.max(pollMs, 10_000));
     }
@@ -167,14 +209,18 @@ async function main() {
   const once = process.argv.includes("--once");
   const api = new BridgeApiClient({ baseUrl, token });
   const codex = new CodexAppServerClient({ codexPath: env("CODEX_PATH", "codex") });
+  const qaCodex = new CodexAppServerClient({ codexPath: env("CODEX_PATH", "codex"),
+    childEnv: aliQaChildEnv() });
   const stop = () => {
     codex.stop();
+    qaCodex.stop();
     process.exit(0);
   };
   process.on("SIGINT", stop);
   process.on("SIGTERM", stop);
-  await runWorker({ api, codex, workerId, once });
+  await runWorker({ api, codex, qaCodex, workerId, once });
   codex.stop();
+  qaCodex.stop();
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] || "").href) {

@@ -4,6 +4,8 @@ const fs = require('node:fs');
 const OUTBOX = process.env.PERSONAL_OS_OPENCLAW_EVENTS_FILE || '/data/personal-os-openclaw-events.ndjson';
 const MAX_TEXT = 4000;
 const KNOWLEDGE_TIMEOUT_MS = 40_000;
+const ALI_MENTION_RE = /(?:^|[\s([{"'])@lobot\b/i;
+const ALI_MENTION_MAX_AGE_MS = 15 * 60_000;
 
 function bounded(value, limit = 200) {
   return typeof value === 'string' && value.length > 0 && value.length <= limit ? value : null;
@@ -206,6 +208,52 @@ async function captureCommitmentBridge(payload, toolCallId, {
   throw new Error('Commitment capture timed out');
 }
 
+async function handleAliGroupMention(event, context, {
+  env = process.env,
+  now = Date.now,
+  request = bridgeRequest,
+  baseUrl = bridgeBaseUrl(env),
+  token = env.CODEX_BRIDGE_TOKEN?.trim(),
+} = {}) {
+  const groupJid = env.ALI_GROUP_JID?.trim();
+  if (!groupJid || context?.channelId !== 'whatsapp' || event?.isGroup !== true ||
+      context.conversationId !== groupJid || context.accountId !== 'default') return undefined;
+
+  // Always claim this exact group, even when the feature is off. No group turn
+  // may fall through to the generic OpenClaw/Gemini personal assistant.
+  const handled = { handled: true };
+  if (env.ALI_GROUP_MENTIONS_ENABLED !== 'true') return handled;
+  const body = typeof event.body === 'string' ? event.body.trim() : '';
+  if (!ALI_MENTION_RE.test(body) || body.startsWith('Lobot · QA ALI')) return handled;
+  const messageId = bounded(context.messageId || event.messageId);
+  const senderId = bounded(context.senderId || event.senderId);
+  const timestamp = Number(event.timestamp);
+  const timeMs = timestamp < 100_000_000_000 ? timestamp * 1000 : timestamp;
+  if (!messageId || !senderId || !Number.isFinite(timeMs) ||
+      timeMs < now() - ALI_MENTION_MAX_AGE_MS || timeMs > now() + 2 * 60_000 ||
+      body.length > 1500 || !token) return handled;
+  try {
+    await request(baseUrl, token, '/ali-group/mentions', {
+      method: 'POST',
+      body: JSON.stringify({
+        accountId: context.accountId,
+        conversationId: groupJid,
+        messageId,
+        senderId,
+        timestamp,
+        body,
+        context: typeof event.content === 'string' ? event.content.slice(-2500) : '',
+        replyToBody: typeof event.replyToBody === 'string'
+          ? event.replyToBody.slice(0, 800) : '',
+      }),
+    });
+  } catch {
+    // The queue is the only permitted path. Never fall through to Gemini or
+    // print the group message, bearer, or sender into the Railway logs.
+  }
+  return handled;
+}
+
 function knowledgeTool(context) {
   if (context?.senderIsOwner !== true) return null;
   return {
@@ -294,6 +342,8 @@ module.exports = {
       try { appendEvent(record); }
       catch { api.logger?.warn?.('personal-os-events: private outbox unavailable'); }
     });
+    api.on('before_dispatch', (event, context) =>
+      handleAliGroupMention(event, context));
   },
   projectReceived,
   projectSent,
@@ -304,4 +354,5 @@ module.exports = {
   bridgeBaseUrl,
   knowledgeTool,
   commitmentTool,
+  handleAliGroupMention,
 };

@@ -1,8 +1,44 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 
 import { ThreadSelectorError } from "./app-server-client.js";
-import { runWorker, runWorkerOnce, summarizeThreads } from "./worker.js";
+import { ALI_QA_CODEX_CONFIG } from "./ali-group.js";
+import { aliQaChildEnv, runWorker, runWorkerOnce, summarizeThreads } from "./worker.js";
+
+test("ALI QA Codex child receives no bridge, GitHub or payment credentials", () => {
+  assert.deepEqual(aliQaChildEnv({ HOME: "/home/test", PATH: "/bin",
+    ALI_GROUP_CODEX_HOME: "/private/qa", CODEX_BRIDGE_TOKEN: "secret",
+    GH_TOKEN: "secret", MP_ACCESS_TOKEN: "secret" }),
+  { HOME: "/home/test", PATH: "/bin", CODEX_HOME: "/private/qa" });
+});
+
+test("ALI QA job uses only dedicated read-only runner and context adapter", async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "ali-qa-home-"));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(home, "auth.json"), "{}");
+  fs.writeFileSync(path.join(home, "config.toml"), ALI_QA_CODEX_CONFIG);
+  const api = apiFixture({ id: "qa-1", source: "ali-group-mention", mode: "read-only",
+    prompt: '{"body":"@lobot QA"}', reply: { channel: "whatsapp-ali-group" } });
+  let genericStarted = false;
+  const codex = { async start() { genericStarted = true; }, async listThreads() { return []; },
+    async runJob() { throw new Error("generic runner used"); } };
+  const qaCodex = { async start() {}, async runAliQaJob(job, options) {
+    assert.equal(job.id, "qa-1");
+    assert.equal(options.threadId, "0199abcd-aaaa-bbbb-cccc-123456789012");
+    assert.equal(options.cwd, "/ali-worktree");
+    assert.equal(options.context.issues[0].number, 463);
+    return { threadId: options.threadId, response: "Respuesta TEST" };
+  } };
+  const result = await runWorkerOnce({ api, codex, qaCodex, workerId: "mac",
+    aliThreadId: "0199abcd-aaaa-bbbb-cccc-123456789012", aliRepoCwd: "/ali-worktree",
+    aliCodexHome: home,
+    aliContext: () => ({ issues: [{ number: 463 }] }) });
+  assert.equal(result.job.response, "Respuesta TEST");
+  assert.equal(genericStarted, false);
+});
 
 function apiFixture(job) {
   const calls = [];

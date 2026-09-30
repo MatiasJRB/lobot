@@ -236,7 +236,90 @@ POST /bridge/api/jobs/<job-id>/deliver
 
 No exponer Codex App Server: el worker siempre inicia la conexión desde la Mac.
 El bridge rechaza `danger-full-access`, usa `read-only` por defecto y sólo
-entrega automáticamente al target personal.
+entrega automáticamente al target personal salvo la excepción QA TEST siguiente.
+
+### `@lobot` en grupo Asiento Libre · QA TEST
+
+Alcance: **un grupo exacto**, sólo remitentes en `groupAllowFrom` (inicialmente
+las variantes de Matías), mención literal `@lobot`, pregunta técnica TEST, un
+hilo Codex separado y respuesta al mismo grupo únicamente con flag de envío.
+No da autoridad para pagar/reembolsar, editar Supabase/MP/GitHub, publicar builds
+ni operar producción. `@lobot` de un remitente no allowlisteado no entra; para
+sumar a Joaquín primero identificar su identidad de WhatsApp y autorizarla
+explícitamente, sin wildcard.
+
+Railway (proyecto **lobot**, no Mango):
+
+```env
+ALI_GROUP_JID=<JID exacto del grupo Asiento Libre>
+ALI_GROUP_MENTIONS_ENABLED=false
+ALI_GROUP_REPLY_ENABLED=false
+PERSONAL_OS_OPENCLAW_EVENTS_ENABLED=true
+```
+
+Con `ALI_GROUP_MENTIONS_ENABLED=true`, el arranque valida plugin cargado,
+`groups` con una sola clave exacta y `requireMention=true` en raíz/cuenta,
+`groupAllowFrom` no vacío/sin wildcard; configura `groupPolicy=allowlist` sólo
+entonces. `before_dispatch` consume todos los mensajes admitidos de ese grupo,
+encola sólo los `@lobot` recientes, y suprime la respuesta Gemini. El endpoint
+de intake requiere el bearer existente, fuerza source/hilo/modo/target, deduplica
+por ID de mensaje y limita a 12 jobs/hora. Con menciones apagadas también rechaza
+POST autenticado. El flujo normal de WhatsApp propio no cambia.
+
+Mac worker (archivo privado `~/.config/secretario-personal/codex-bridge.env`):
+
+```env
+ALI_GROUP_REPO_CWD=<checkout limpio de MatiasJRB/asiento-libre>
+ALI_GROUP_CODEX_HOME=<directorio privado aislado para QA>
+ALI_GROUP_CODEX_THREAD_ID=<ID creado por provision-ali-qa-thread.js>
+CODEX_PATH=<binario Codex vigente de ChatGPT.app>
+# Opcional: token TEST, nunca APP_USR/producción; sólo GET por payment ID explícito
+ALI_QA_MP_TEST_TOKEN=<TEST-...>
+```
+
+Crear un hilo **una sola vez** con `ALI_GROUP_REPO_CWD=... ALI_GROUP_CODEX_HOME=... CODEX_PATH=... node
+scripts/provision-ali-qa-thread.js`; el script verifica el remote y completa
+un turno bootstrap, necesario para persistir el hilo. Crea un `CODEX_HOME`
+privado `0700`, copia la credencial Codex a `auth.json` `0600` y escribe una
+configuración exacta sin MCP/apps/plugins, búsqueda web, shell, hooks ni
+multiagente. **No usar el ID de un hilo creado en el Codex home personal:** es
+otro almacén de rollouts. Reinstalar el worker con
+`scripts/install-codex-bridge-launch-agent.sh` para copiar los módulos nuevos.
+La ejecución del grupo usa proceso Codex separado con entorno allowlist (sin
+tokens Bridge/GitHub/MP), `approvalPolicy=never`, sandbox `readOnly` sin red y
+checkout ALI fijo. Antes de consultar al modelo, el worker obtiene issues QA
+#463/#490, refs de issues mencionadas y estado del GitHub Project #4 mediante
+comandos `gh issue view` y `gh project item-list` de lectura. También consulta
+`engram search --project asiento-libre --limit 3` desde el worker; sus notas son
+históricas, nunca evidencia del estado actual. Si una fuente no responde, se
+marca indisponible; no se inventa estado. Si el mensaje nombra un `pago MP`
+o `payment_id` numérico explícito y se configuró `ALI_QA_MP_TEST_TOKEN` con
+prefijo `TEST-`, el worker hace sólo `GET /v1/payments/{id}` y pasa al modelo
+una proyección sin datos del comprador ni token. No consulta ni modifica pagos
+automáticamente fuera de ese caso. Supabase TEST no tiene adaptador automático:
+no afirmar que se verificó si no hay evidencia; para agregarlo se requiere una
+consulta acotada de lectura con RLS y sin SQL ni API mutable.
+
+**Secuencia de activación**: tests → deploy del código a Railway verificado en
+cuenta/workspace lobot → setear JID con ambos flags `false` → instalar worker y
+verificar hilo → correr smoke local sintético con reply `false` (ningún envío)
+→ inspeccionar respuesta, permisos y logs sin PII → activar menciones y observar
+una mención real allowlisteada con reply `false` → sólo con autorización explícita
+activar `ALI_GROUP_REPLY_ENABLED=true`. Una entrega de grupo se registra como
+intentada **antes** de llamar a WhatsApp; si el proveedor devuelve resultado
+incierto, no reintentar por `/jobs/:id/deliver`: revisión manual para evitar
+duplicados. Los jobs completados con reply apagado o después de 30 minutos se
+marcan suprimidos permanentemente: activar el flag no envía backlog. No usar
+una mención real del grupo para probar el envío sin acordarlo.
+El smoke local `node scripts/ali-qa-smoke.js` (con las cuatro variables `ALI_GROUP_*`
+anteriores y `CODEX_PATH`) prueba hook→API→cola→Codex→resultado sin proveedor;
+exige `group-replies-disabled` y salida válida. No envía WhatsApp.
+
+**Rollback**: poner ambos flags en `false` y redeploy/restart Railway. El
+arranque devuelve `groupPolicy=disabled` en raíz/cuenta; DM y `selfChatMode`
+quedan intactos. Luego detener/reinstalar worker si corresponde; no borrar cola
+ni hilo para evitar pérdida de evidencia. Si plugin o allowlist falla, el
+arranque aborta la habilitación de grupos.
 
 Calendar write opcional:
 
