@@ -13,6 +13,7 @@ import { WebSocketServer } from "ws";
 import { createBridgeRouter } from "./bridge/routes.js";
 import { BridgeStore, resolveBridgeStatePath } from "./bridge/store.js";
 import { aliGroupConfigUpdates, aliGroupDeliveryMessage } from "./bridge/ali-group-runtime.js";
+import aliGroupOutbound from "./bridge/ali-group-outbound.cjs";
 import {
   ACCOUNTANT_CRON_JOBS,
   accountantCommandCreateArgs,
@@ -64,6 +65,7 @@ const SETUP_PASSWORD = process.env.SETUP_PASSWORD?.trim();
 const CODEX_BRIDGE_TOKEN = process.env.CODEX_BRIDGE_TOKEN?.trim() || "";
 const PERSONAL_OS_NOTICE_TOKEN = process.env.PERSONAL_OS_NOTICE_TOKEN?.trim() || "";
 const codexBridgeStore = new BridgeStore(resolveBridgeStatePath());
+const { createAliGroupReplyPermit, clearAliGroupReplyPermit } = aliGroupOutbound;
 
 function resolveGatewayToken() {
   const envTok = process.env.OPENCLAW_GATEWAY_TOKEN?.trim();
@@ -606,10 +608,16 @@ async function deliverCodexBridgeJob(job) {
     const message = aliGroupDeliveryMessage(job, { groupJid: target,
       replyEnabled: boolFromEnv("ALI_GROUP_REPLY_ENABLED") });
     await ensureGatewayRunning();
-    const result = await runCmd(OPENCLAW_NODE, clawArgs([
-      "message", "send", "--channel", "whatsapp", "--account", "default",
-      "--target", target, "--message", message, "--json",
-    ]), { secrets: [target, message] });
+    const permit = createAliGroupReplyPermit(target, message);
+    let result;
+    try {
+      result = await runCmd(OPENCLAW_NODE, clawArgs([
+        "message", "send", "--channel", "whatsapp", "--account", "default",
+        "--target", target, "--message", message, "--json",
+      ]), { secrets: [target, message] });
+    } finally {
+      clearAliGroupReplyPermit(permit);
+    }
     const receipt = projectExactWhatsAppDelivery({ code: result.code,
       raw: parseJsonFromCommandOutput(result.output) }, { target, message });
     if (!receipt.ok) throw new Error("OpenClaw ALI group delivery not confirmed");

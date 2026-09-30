@@ -1,5 +1,6 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs');
+const { ALI_LABEL, consumeAliGroupReplyPermit } = require('../../bridge/ali-group-outbound.cjs');
 
 const OUTBOX = process.env.PERSONAL_OS_OPENCLAW_EVENTS_FILE || '/data/personal-os-openclaw-events.ndjson';
 const MAX_TEXT = 4000;
@@ -214,9 +215,16 @@ async function handleAliGroupMention(event, context, {
   request = bridgeRequest,
   baseUrl = bridgeBaseUrl(env),
   token = env.CODEX_BRIDGE_TOKEN?.trim(),
+  onDiagnostic = () => {},
 } = {}) {
   const groupJid = env.ALI_GROUP_JID?.trim();
-  if (!groupJid || context?.channelId !== 'whatsapp' || event?.isGroup !== true ||
+  if (groupJid && context?.channelId === 'whatsapp' &&
+      (event?.isGroup === true || context?.conversationId === groupJid)) {
+    onDiagnostic({ exactGroup: context?.conversationId === groupJid,
+      isGroup: event?.isGroup === true, accountDefault: context?.accountId === 'default',
+      hasMention: ALI_MENTION_RE.test(String(event?.body || '')) });
+  }
+  if (!groupJid || context?.channelId !== 'whatsapp' ||
       context.conversationId !== groupJid || context.accountId !== 'default') return undefined;
 
   // Always claim this exact group, even when the feature is off. No group turn
@@ -224,7 +232,8 @@ async function handleAliGroupMention(event, context, {
   const handled = { handled: true };
   if (env.ALI_GROUP_MENTIONS_ENABLED !== 'true') return handled;
   const body = typeof event.body === 'string' ? event.body.trim() : '';
-  if (!ALI_MENTION_RE.test(body) || body.startsWith('Lobot · QA ALI')) return handled;
+  if (!ALI_MENTION_RE.test(body) || body.startsWith('Lobot · QA ALI') ||
+      body.startsWith(ALI_LABEL)) return handled;
   const messageId = bounded(context.messageId || event.messageId);
   const senderId = bounded(context.senderId || event.senderId);
   const timestamp = Number(event.timestamp);
@@ -252,6 +261,21 @@ async function handleAliGroupMention(event, context, {
     // print the group message, bearer, or sender into the Railway logs.
   }
   return handled;
+}
+
+function guardAliGroupOutbound(event, context, {
+  env = process.env,
+  consumePermit = consumeAliGroupReplyPermit,
+} = {}) {
+  const groupJid = env.ALI_GROUP_JID?.trim();
+  if (!groupJid || context?.channelId !== 'whatsapp' ||
+      event?.to !== groupJid && context?.conversationId !== groupJid) return undefined;
+  if (env.ALI_GROUP_REPLY_ENABLED !== 'true' || context?.accountId !== 'default' ||
+      event?.to !== groupJid || !consumePermit(groupJid, event?.content,
+        { directory: env.ALI_GROUP_OUTBOUND_PERMIT_DIR })) {
+    return { cancel: true, cancelReason: 'ali-group-bridge-only' };
+  }
+  return undefined;
 }
 
 function knowledgeTool(context) {
@@ -342,8 +366,11 @@ module.exports = {
       try { appendEvent(record); }
       catch { api.logger?.warn?.('personal-os-events: private outbox unavailable'); }
     });
+    api.on('message_sending', (event, context) =>
+      guardAliGroupOutbound(event, context));
     api.on('before_dispatch', (event, context) =>
-      handleAliGroupMention(event, context));
+      handleAliGroupMention(event, context, { onDiagnostic: (facts) =>
+        api.logger?.info?.(`[ali-qa] before_dispatch ${JSON.stringify(facts)}`) }));
   },
   projectReceived,
   projectSent,
@@ -355,4 +382,5 @@ module.exports = {
   knowledgeTool,
   commitmentTool,
   handleAliGroupMention,
+  guardAliGroupOutbound,
 };

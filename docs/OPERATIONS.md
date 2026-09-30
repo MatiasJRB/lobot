@@ -268,6 +268,12 @@ POST autenticado. El flujo normal de WhatsApp propio no cambia.
 La entrega automática al grupo se rotula siempre `🤖 Ali:` en la capa de salida
 del puente, incluso si el modelo omite el rótulo; los mensajes personales que
 Matías escribe fuera del puente no se modifican.
+El hook `message_sending` cancela cualquier salida OpenClaw a ese grupo si el
+flag de respuesta está apagado o si no consume un permiso privado, de un solo
+uso y 60 segundos, creado por el servidor para el texto exacto `🤖 Ali:` del
+job. Así una caída al modelo personal no puede enviar al grupo. Esto es una
+segunda barrera de salida, no reemplaza verificar que `before_dispatch`
+intercepte antes de que el modelo personal use herramientas.
 
 Mac worker (archivo privado `~/.config/secretario-personal/codex-bridge.env`):
 
@@ -323,6 +329,13 @@ arranque devuelve `groupPolicy=disabled` en raíz/cuenta; DM y `selfChatMode`
 quedan intactos. Luego detener/reinstalar worker si corresponde; no borrar cola
 ni hilo para evitar pérdida de evidencia. Si plugin o allowlist falla, el
 arranque aborta la habilitación de grupos.
+
+Incidente 2026-09-30: la primera mención real de Matías llegó a OpenClaw pero
+`before_dispatch` no la reclamó; Gemini publicó una respuesta no deseada.
+Se apagaron ambos flags y se verificó `groupPolicy=disabled` en raíz/cuenta.
+No reactivar hasta probar el hook real y la segunda barrera de salida: los
+tests sintéticos que llaman el handler directamente no prueban la admisión del
+runtime OpenClaw.
 
 Calendar write opcional:
 
