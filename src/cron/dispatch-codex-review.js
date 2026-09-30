@@ -14,6 +14,10 @@ function argValue(name, args = process.argv.slice(2)) {
   return index >= 0 ? args[index + 1] : null;
 }
 
+function hasArg(name, args = process.argv.slice(2)) {
+  return args.includes(name);
+}
+
 export function localDateKey(now = new Date(), timeZone = PERSONAL_OS_TIMEZONE) {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone,
@@ -67,14 +71,28 @@ function clientFromEnv() {
 export async function runReview(
   cadence,
   {
-    client = clientFromEnv(),
+    client = null,
     now = new Date(),
     output = console.log,
+    allowCodex = false,
   } = {},
 ) {
   const date = localDateKey(now);
   const isCommitmentReview = cadence === "commitments";
-  const result = await client.enqueueJob({
+  buildReviewPrompt(cadence, now);
+  if (!isCommitmentReview && !allowCodex) {
+    const summary = {
+      ok: true,
+      cadence,
+      date,
+      skipped: true,
+      reason: "quota_guard",
+    };
+    output(JSON.stringify(summary));
+    return summary;
+  }
+  const activeClient = client || clientFromEnv();
+  const result = await activeClient.enqueueJob({
     prompt: buildReviewPrompt(cadence, now),
     thread: isCommitmentReview ? "recent" : PERSONAL_OS_THREAD,
     cwd: PERSONAL_ORGANIZATION_DIR,
@@ -97,7 +115,7 @@ export async function runReview(
 
 if (import.meta.url === pathToFileURL(process.argv[1] || "").href) {
   const cadence = argValue("--cadence");
-  runReview(cadence).catch((error) => {
+  runReview(cadence, { allowCodex: hasArg("--allow-codex") }).catch((error) => {
     console.error(`[personal-os-review] ${error.message}`);
     process.exitCode = 1;
   });

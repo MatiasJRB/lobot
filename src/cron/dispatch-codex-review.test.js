@@ -58,6 +58,7 @@ test("runReview enqueues one idempotent writable job in the exact task", async (
     client,
     now: new Date("2026-09-13T21:30:00Z"),
     output: (line) => output.push(line),
+    allowCodex: true,
   });
 
   assert.equal(calls.length, 1);
@@ -68,6 +69,34 @@ test("runReview enqueues one idempotent writable job in the exact task", async (
   assert.deepEqual(calls[0].reply, { channel: "whatsapp-self" });
   assert.equal(result.jobId, "job-1");
   assert.equal(JSON.parse(output[0]).status, "queued");
+});
+
+test("low-quota guard skips scheduled weekly and monthly Codex runs", async () => {
+  const calls = [];
+  const client = { async enqueueJob(input) { calls.push(input); } };
+  const output = [];
+
+  const weekly = await runReview("weekly", {
+    client,
+    now: new Date("2026-09-13T21:30:00Z"),
+    output: (line) => output.push(JSON.parse(line)),
+  });
+  const monthly = await runReview("monthly", {
+    client,
+    now: new Date("2026-10-01T21:30:00Z"),
+    output: (line) => output.push(JSON.parse(line)),
+  });
+
+  assert.equal(calls.length, 0);
+  assert.deepEqual(weekly, {
+    ok: true,
+    cadence: "weekly",
+    date: "2026-09-13",
+    skipped: true,
+    reason: "quota_guard",
+  });
+  assert.equal(monthly.skipped, true);
+  assert.equal(output.length, 2);
 });
 
 test("buildReviewPrompt rejects unknown cadence", () => {

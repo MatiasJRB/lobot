@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   PERSONAL_OS_CRON_JOBS,
+  PERSONAL_OS_MANUAL_CODEX_CADENCES,
   PERSONAL_OS_MESSAGING_CONTRACT_VERSION,
   acceptsPersonalOsMessagingContract,
   personalOsCommandCreateArgs,
@@ -18,15 +19,14 @@ const opts = {
   outputMaxBytes: 4000,
 };
 
-test("personal OS schedules one daily commitment review plus weekly and monthly reviews", () => {
+test("low-quota V1 schedules only the deterministic daily review", () => {
   assert.deepEqual(
     PERSONAL_OS_CRON_JOBS.map(({ cadence, schedule }) => ({ cadence, schedule })),
     [
       { cadence: "commitments", schedule: "30 9 * * *" },
-      { cadence: "weekly", schedule: "30 18 * * 0" },
-      { cadence: "monthly", schedule: "30 18 1 * *" },
     ],
   );
+  assert.deepEqual(PERSONAL_OS_MANUAL_CODEX_CADENCES, ["weekly", "monthly"]);
 });
 
 test("personal OS cron activation requires the exact messaging contract", () => {
@@ -47,10 +47,10 @@ test("personal OS cron activation requires the exact messaging contract", () => 
   );
 });
 
-test("personal OS cron commands dispatch to Codex without OpenClaw delivery", () => {
-  const weekly = PERSONAL_OS_CRON_JOBS[1];
-  const created = personalOsCommandCreateArgs(weekly, opts);
-  const edited = personalOsCommandEditArgs("job-1", weekly, opts);
+test("personal OS cron command dispatches through the bridge without direct delivery", () => {
+  const commitments = PERSONAL_OS_CRON_JOBS[0];
+  const created = personalOsCommandCreateArgs(commitments, opts);
+  const edited = personalOsCommandEditArgs("job-1", commitments, opts);
 
   for (const args of [created, edited]) {
     assert.ok(args.includes("--no-deliver"));
@@ -62,7 +62,7 @@ test("personal OS cron commands dispatch to Codex without OpenClaw delivery", ()
       "node",
       "/app/src/cron/dispatch-codex-review.js",
       "--cadence",
-      "weekly",
+      "commitments",
     ]);
   }
 });
