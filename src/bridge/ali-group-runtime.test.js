@@ -39,7 +39,9 @@ test("ALI group message has fixed heading, fixed target and secret guard", () =>
   const job = { source: "ali-group-mention", status: "done", response: "Usá tarjeta TEST.",
     reply: { channel: "whatsapp-ali-group", conversationId: groupJid } };
   assert.equal(aliGroupDeliveryMessage(job, { groupJid, replyEnabled: true }),
-    "Lobot · QA ALI\n\nUsá tarjeta TEST.");
+    "🤖 Ali:\n\nUsá tarjeta TEST.");
+  assert.equal(aliGroupDeliveryMessage({ ...job, response: "🤖 Ali:\n\nUsá tarjeta TEST." },
+    { groupJid, replyEnabled: true }), "🤖 Ali:\n\nUsá tarjeta TEST.");
   assert.throws(() => aliGroupDeliveryMessage(job, { groupJid, replyEnabled: false }), TypeError);
   assert.throws(() => aliGroupDeliveryMessage({ ...job, reply: { ...job.reply,
     conversationId: "000000000000@g.us" } }, { groupJid, replyEnabled: true }), TypeError);

@@ -44,5 +44,6 @@ export function aliGroupDeliveryMessage(job, { groupJid, replyEnabled } = {}) {
       job.reply.conversationId !== groupJid || job.status !== "done") {
     throw new TypeError("ALI group delivery is disabled or target is invalid");
   }
-  return `Lobot · QA ALI\n\n${validateAliGroupAnswer(job.response)}`;
+  const answer = validateAliGroupAnswer(job.response).replace(/^(?:🤖 Ali:\s*)+/u, "");
+  return `🤖 Ali:\n\n${validateAliGroupAnswer(answer)}`;
 }

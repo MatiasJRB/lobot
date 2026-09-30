@@ -265,6 +265,9 @@ encola sólo los `@lobot` recientes, y suprime la respuesta Gemini. El endpoint
 de intake requiere el bearer existente, fuerza source/hilo/modo/target, deduplica
 por ID de mensaje y limita a 12 jobs/hora. Con menciones apagadas también rechaza
 POST autenticado. El flujo normal de WhatsApp propio no cambia.
+La entrega automática al grupo se rotula siempre `🤖 Ali:` en la capa de salida
+del puente, incluso si el modelo omite el rótulo; los mensajes personales que
+Matías escribe fuera del puente no se modifican.
 
 Mac worker (archivo privado `~/.config/secretario-personal/codex-bridge.env`):
 
