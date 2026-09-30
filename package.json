@@ -10,16 +10,22 @@
     "bridge:worker:once": "node src/bridge/worker.js --once",
     "bridge:threads": "node src/cli/codex-bridge.js threads",
     "personal-os:review": "node src/cron/dispatch-codex-review.js",
+    "personal-os:review:weekly": "node src/cron/dispatch-codex-review.js --cadence weekly --allow-codex",
+    "personal-os:review:monthly": "node src/cron/dispatch-codex-review.js --cadence monthly --allow-codex",
+    "personal-os:mcp": "node src/mcp/personal-os-server.js",
+    "personal-os:mcp:tunnel": "node src/mcp/personal-os-tunnel-server.js",
     "dev": "node src/server.js",
     "start": "node src/server.js",
     "lint": "node -c src/server.js",
-    "test": "node --test src/"
+    "test": "node --test 'src/**/*.test.js'"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.31.0",
     "express": "^5.1.0",
     "http-proxy": "^1.18.1",
     "node-pty": "^1.0.0",
-    "ws": "^8.18.0"
+    "ws": "^8.18.0",
+    "zod": "^4.6.5"
   },
   "description": "Secretario personal en OpenClaw/Railway con Gemini, WhatsApp y puente a Codex Mac",
   "packageManager": "pnpm@11.9.0+sha512.bd682d5d03fe525ef7c9fd6780c6884d1e756ac4c9c9fe00c538782824310dcf90e3ddc4f53835f06dfaebd5085e41855e0bcbb3b60de2ac5bbab89e5036f03b"
