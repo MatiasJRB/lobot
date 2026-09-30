@@ -6,17 +6,11 @@ export const PERSONAL_OS_CRON_JOBS = [
     schedule: "30 9 * * *",
     name: "Personal OS — compromisos y plazos",
   },
-  {
-    cadence: "weekly",
-    schedule: "30 18 * * 0",
-    name: "Personal OS — revisión semanal",
-  },
-  {
-    cadence: "monthly",
-    schedule: "30 18 1 * *",
-    name: "Personal OS — cierre mensual",
-  },
 ];
+
+// V1 de bajo consumo: estas revisiones siguen disponibles, pero sólo se
+// ejecutan a pedido explícito con --allow-codex. Nunca se calendarizan.
+export const PERSONAL_OS_MANUAL_CODEX_CADENCES = Object.freeze(["weekly", "monthly"]);
 
 export const PERSONAL_OS_MESSAGING_CONTRACT_VERSION = "2026-09-12-v1";
 
