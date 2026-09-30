@@ -218,14 +218,21 @@ async function handleAliGroupMention(event, context, {
   onDiagnostic = () => {},
 } = {}) {
   const groupJid = env.ALI_GROUP_JID?.trim();
+  // OpenClaw 2026.9.2 passes the self recipient as before_dispatch's
+  // conversationId for WhatsApp groups, even though message_received gets the
+  // group JID. The internally built group session key retains the exact JID.
+  const sessionGroup = typeof context?.sessionKey === 'string' &&
+    context.sessionKey.endsWith(`:whatsapp:group:${groupJid?.toLowerCase()}`);
+  const exactGroup = event?.isGroup === true &&
+    (context?.conversationId === groupJid || sessionGroup);
   if (groupJid && context?.channelId === 'whatsapp' &&
       (event?.isGroup === true || context?.conversationId === groupJid)) {
-    onDiagnostic({ exactGroup: context?.conversationId === groupJid,
+    onDiagnostic({ exactGroup, sessionGroup,
       isGroup: event?.isGroup === true, accountDefault: context?.accountId === 'default',
       hasMention: ALI_MENTION_RE.test(String(event?.body || '')) });
   }
-  if (!groupJid || context?.channelId !== 'whatsapp' ||
-      context.conversationId !== groupJid || context.accountId !== 'default') return undefined;
+  if (!groupJid || context?.channelId !== 'whatsapp' || !exactGroup ||
+      context.accountId !== 'default') return undefined;
 
   // Always claim this exact group, even when the feature is off. No group turn
   // may fall through to the generic OpenClaw/Gemini personal assistant.

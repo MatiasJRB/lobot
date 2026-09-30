@@ -337,6 +337,16 @@ No reactivar hasta probar el hook real y la segunda barrera de salida: los
 tests sintéticos que llaman el handler directamente no prueban la admisión del
 runtime OpenClaw.
 
+Segunda prueba controlada 2026-09-30 (respuesta apagada): `before_dispatch`
+recibió `isGroup=true` y la mención, pero su `conversationId` no era el JID del
+grupo. El mapeador de OpenClaw 2026.9.2 elige el destinatario propio para ese
+contexto, mientras `message_received` conserva el JID correcto; la sesión
+persistida sí tiene `agent:main:whatsapp:group:<JID>`. No se creó job ni se
+observó respuesta grupal ni recibo de envío. Se apagaron ambos flags y se
+verificó otra vez `groupPolicy=disabled` en raíz/cuenta. El hook ahora reconoce
+el JID exacto mediante la clave de sesión de grupo **y** `isGroup=true`; aún
+requiere una nueva validación real autorizada antes de reactivar producción.
+
 Calendar write opcional:
 
 ```bash
