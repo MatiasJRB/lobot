@@ -14,6 +14,7 @@ import { pullPersonalOsEvents } from "./personal-os-events.js";
 import { pullPersonalOsNotices } from "./personal-os-notices.js";
 import { runKnowledgeQuery } from "./knowledge-query.js";
 import { collectAliQaContext } from "./ali-qa-context.js";
+import { syncAliQaAuth } from "./ali-qa-auth.js";
 import { ALI_GROUP_SOURCE, ALI_QA_CODEX_CONFIG } from "./ali-group.js";
 import {
   captureCommitmentJob,
@@ -21,7 +22,7 @@ import {
   runCommitmentReview,
 } from "./commitment-cli.js";
 
-export const WORKER_VERSION = "0.1.0";
+export const WORKER_VERSION = "0.1.1";
 const MAX_BUSY_ATTEMPTS = 12;
 const MAX_HEARTBEAT_PREVIEW_CHARS = 240;
 
@@ -75,7 +76,7 @@ function selectorFailure(error) {
 }
 
 export async function runWorkerOnce({ api, codex, workerId, leaseMs = 35 * 60 * 1000,
-  qaCodex = null, aliContext = collectAliQaContext,
+  qaCodex = null, aliContext = collectAliQaContext, aliAuthSync = syncAliQaAuth,
   aliThreadId = process.env.ALI_GROUP_CODEX_THREAD_ID,
   aliRepoCwd = process.env.ALI_GROUP_REPO_CWD,
   aliCodexHome = process.env.ALI_GROUP_CODEX_HOME,
@@ -127,7 +128,10 @@ export async function runWorkerOnce({ api, codex, workerId, leaseMs = 35 * 60 * 
             ? await (async () => {
                 if (!qaCodex || !aliThreadId || !aliRepoCwd)
                   throw new Error("ALI QA dedicated runner is not configured");
+                // Drop any in-memory login before refreshing the private cache.
+                if (typeof qaCodex.stop === "function") await qaCodex.stop();
                 assertAliQaHome(aliCodexHome);
+                await aliAuthSync(aliCodexHome);
                 const context = await aliContext(job.prompt, { cwd: aliRepoCwd });
                 await qaCodex.start();
                 return qaCodex.runAliQaJob(job, { threadId: aliThreadId,

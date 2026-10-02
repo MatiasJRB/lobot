@@ -294,6 +294,15 @@ configuración exacta sin MCP/apps/plugins, búsqueda web, shell, hooks ni
 multiagente. **No usar el ID de un hilo creado en el Codex home personal:** es
 otro almacén de rollouts. Reinstalar el worker con
 `scripts/install-codex-bridge-launch-agent.sh` para copiar los módulos nuevos.
+Antes de cada ejecución, el worker detiene el cliente QA anterior y sincroniza
+**sólo `auth.json`** desde el login canónico `~/.codex/auth.json` si su
+`last_refresh` es más reciente. Valida credenciales ChatGPT de la misma cuenta,
+archivos regulares privados `0600` y home privado; rechaza symlinks, cuenta
+distinta, API keys o JSON inválido con errores sin secretos. La escritura es
+atómica y nunca reemplaza un refresh más nuevo del propio QA. No copia config,
+plugins, historial ni herramientas personales. Si falla la validación, no
+inicia el modelo ni consulta contexto; revisar el login local, no quitar el
+aislamiento ni crear otro hilo para solucionar un `401`.
 La ejecución del grupo usa proceso Codex separado con entorno allowlist (sin
 tokens Bridge/GitHub/MP), `approvalPolicy=never`, sandbox `readOnly` sin red y
 checkout ALI fijo. Antes de consultar al modelo, el worker obtiene issues QA
@@ -373,6 +382,15 @@ pruebas exitosas posteriores fueron con Mac accesible/tapa abierta. No se
 desactivó el bloqueo de seguridad ni se validó funcionamiento con tapa cerrada.
 El hilo fijado **Estación híbrida Mac + PC** lleva esa investigación; no tratar
 esta validación del puente como una solución de suspensión o continuidad 24/7.
+
+Incidente 2026-10-02: una mención de Joaquín quedó excluida por la allowlist
+original (sigue requiriendo autorización explícita para agregarlo). La mención
+posterior de Matías sí creó job, pero falló con `workspace routing discovery
+unauthorized (401)` sin intento de entrega: el cache QA provisionado conservaba
+un login vencido aunque el login personal se había renovado. Se incorporó la
+sincronización privada anterior; no se reencolan menciones viejas ni se envían
+mensajes nuevos al grupo para probar esta reparación. No fue una suspensión de
+la Mac.
 
 Calendar write opcional:
 

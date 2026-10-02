@@ -22,10 +22,13 @@ test("ALI QA job uses only dedicated read-only runner and context adapter", asyn
   fs.writeFileSync(path.join(home, "config.toml"), ALI_QA_CODEX_CONFIG);
   const api = apiFixture({ id: "qa-1", source: "ali-group-mention", mode: "read-only",
     prompt: '{"body":"@lobot QA"}', reply: { channel: "whatsapp-ali-group" } });
+  const order = [];
   let genericStarted = false;
   const codex = { async start() { genericStarted = true; }, async listThreads() { return []; },
     async runJob() { throw new Error("generic runner used"); } };
-  const qaCodex = { async start() {}, async runAliQaJob(job, options) {
+  const qaCodex = { stop() { order.push("stop"); }, async start() { order.push("start"); },
+    async runAliQaJob(job, options) {
+    order.push("run");
     assert.equal(job.id, "qa-1");
     assert.equal(options.threadId, "0199abcd-aaaa-bbbb-cccc-123456789012");
     assert.equal(options.cwd, "/ali-worktree");
@@ -35,9 +38,30 @@ test("ALI QA job uses only dedicated read-only runner and context adapter", asyn
   const result = await runWorkerOnce({ api, codex, qaCodex, workerId: "mac",
     aliThreadId: "0199abcd-aaaa-bbbb-cccc-123456789012", aliRepoCwd: "/ali-worktree",
     aliCodexHome: home,
-    aliContext: () => ({ issues: [{ number: 463 }] }) });
+    aliAuthSync: (qaHome) => { assert.equal(qaHome, home); order.push("auth"); },
+    aliContext: () => { order.push("context"); return { issues: [{ number: 463 }] }; } });
   assert.equal(result.job.response, "Respuesta TEST");
   assert.equal(genericStarted, false);
+  assert.deepEqual(order, ["stop", "auth", "context", "start", "run"]);
+});
+
+test("ALI credential failure stops before context or either model and records no response", async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "ali-qa-home-"));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(home, "auth.json"), "{}");
+  fs.writeFileSync(path.join(home, "config.toml"), ALI_QA_CODEX_CONFIG);
+  const api = apiFixture({ id: "qa-bad-auth", source: "ali-group-mention", prompt: "{}" });
+  const never = () => { assert.fail("must not access context or model after auth failure"); };
+  let stopped = false;
+  const result = await runWorkerOnce({ api, workerId: "mac", personalOsSync: false,
+    codex: { start: never, listThreads: never, runJob: never },
+    qaCodex: { stop() { stopped = true; }, start: never, runAliQaJob: never },
+    aliThreadId: "dedicated-thread", aliRepoCwd: "/ali-worktree", aliCodexHome: home,
+    aliContext: never, aliAuthSync: () => { throw new Error("ALI QA credential cache is unsafe"); } });
+  assert.equal(stopped, true);
+  assert.equal(result.job.status, "failed");
+  assert.equal(result.job.response, null);
+  assert.equal(result.job.error, "ALI QA credential cache is unsafe");
 });
 
 function apiFixture(job) {

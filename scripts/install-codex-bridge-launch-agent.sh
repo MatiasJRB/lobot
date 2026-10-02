@@ -28,7 +28,7 @@ fi
 mkdir -p "${HOME}/Library/LaunchAgents" "$LOG_DIR" "$INSTALL_DIR"
 chmod 600 "$ENV_FILE"
 cp "${REPO_DIR}/scripts/run-codex-bridge-worker.sh" "$RUNNER"
-for module in worker api-client app-server-client ali-group ali-qa-context \
+for module in worker api-client app-server-client ali-group ali-qa-context ali-qa-auth \
   commitment-cli knowledge-query personal-os-events personal-os-notices; do
   cp "${REPO_DIR}/src/bridge/${module}.js" "${INSTALL_DIR}/${module}.js"
 done
