@@ -326,16 +326,18 @@ export class CodexAppServerClient extends EventEmitter {
       sandboxPolicy: { type: "readOnly", networkAccess: false },
       ...(intakeMessages.length ? { outputSchema: {
         type: "object", additionalProperties: false, required: ["answer", "items"], properties: {
-          answer: { type: "string", minLength: 1, maxLength: 1800 },
-          items: { type: "array", maxItems: 3, items: { type: "object", additionalProperties: false,
+          // The provider accepts a JSON Schema subset. Keep bounds and source
+          // uniqueness in parseAliIntakeEnvelope, not unsupported keywords here.
+          answer: { type: "string" },
+          items: { type: "array", items: { type: "object", additionalProperties: false,
             required: ["kind", "title", "summary", "sourceIds", "confidence", "issue"], properties: {
               kind: { type: "string", enum: ["definition", "task", "clarify"] },
-              title: { type: "string", minLength: 1, maxLength: 160 },
-              summary: { type: "string", minLength: 1, maxLength: 1600 },
-              sourceIds: { type: "array", minItems: 1, maxItems: 16, uniqueItems: true,
+              title: { type: "string" },
+              summary: { type: "string" },
+              sourceIds: { type: "array",
                 items: { type: "string", enum: intakeMessages.map((m) => m.id) } },
-              confidence: { type: "number", minimum: 0, maximum: 1 },
-              issue: { enum: [null, ...(context?.issues || []).filter((i) => !i.unavailable && i.state === "OPEN").map((i) => i.number)] },
+              confidence: { type: "number" },
+              issue: { type: ["integer", "null"], enum: [null, ...(context?.issues || []).filter((i) => !i.unavailable && i.state === "OPEN").map((i) => i.number)] },
             } } },
         },
       } } : {}),

@@ -261,4 +261,23 @@ test("structured model contract supplies bounded evidence while tools remain dis
   assert.match(calls[1].input[0].text, /id1/);
   assert.deepEqual(calls[1].sandboxPolicy, { type: "readOnly", networkAccess: false });
   assert.deepEqual(calls[1].outputSchema.properties.items.items.properties.sourceIds.items.enum, ["id1"]);
+  // Regression for real job a53e375c: provider rejected uniqueItems with HTTP400.
+  const allowedKeywords = new Set(["type", "additionalProperties", "required", "properties", "items", "enum"]);
+  function assertProviderSubset(schema) {
+    for (const key of Object.keys(schema)) assert.ok(allowedKeywords.has(key), `unsupported schema keyword ${key}`);
+    for (const child of Object.values(schema.properties || {})) assertProviderSubset(child);
+    if (schema.items) assertProviderSubset(schema.items);
+  }
+  assertProviderSubset(calls[1].outputSchema);
+});
+
+test("local validation retains uniqueness and bounds omitted from provider schema", (t) => {
+  const f = fixture(t); const envelope = classified(f, 494);
+  const parse = () => parseAliIntakeEnvelope(JSON.stringify(envelope), f.journal.state.messages, { allowedIssues: [494] });
+  const item = envelope.items[0]; const ids = [...item.sourceIds];
+  item.sourceIds.push(ids[0]); assert.throws(parse, /evidence/); item.sourceIds = ids;
+  item.confidence = 2; assert.throws(parse, /evidence/); item.confidence = .98;
+  item.title = "x".repeat(161); assert.throws(parse, /evidence/); item.title = "Cancelación";
+  envelope.answer = "x".repeat(1801); assert.throws(parse, /invalid/); envelope.answer = "Entendido.";
+  envelope.items = [item, item, item, item]; assert.throws(parse, /invalid/);
 });
