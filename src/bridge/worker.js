@@ -113,7 +113,9 @@ export async function runWorkerOnce({ api, codex, workerId, leaseMs = 35 * 60 * 
   const localOnly = job && [ALI_GROUP_SOURCE, "knowledge-hub-query", "personal-os-commitment-capture",
     "personal-os-commitment-review"].includes(job.source);
   let threads = [];
-  if (!localOnly) {
+  // Idle ALI polling/consolidation does not need the personal thread catalog.
+  // A catalog timeout must not prevent the isolated intake from making progress.
+  if (!localOnly && (job || !aliIntake)) {
     if (typeof codex.start === "function") await codex.start();
     threads = await codex.listThreads({ limit: 100 });
   }

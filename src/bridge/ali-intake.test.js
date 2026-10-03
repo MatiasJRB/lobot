@@ -234,6 +234,8 @@ test("unmentioned conversation consolidates silently and never calls queue deliv
 
 test("idle observation consumes zero model calls and no writes", async (t) => {
   const f = fixture(t); const w = workerFixture(t, f, null);
+  w.options.codex.start = async () => { throw new Error("personal runner forbidden"); };
+  w.options.codex.listThreads = async () => { throw new Error("personal catalog unavailable"); };
   assert.deepEqual(await runWorkerOnce(w.options), { processed: false });
   assert.equal(w.calls.length, 0);
 });
