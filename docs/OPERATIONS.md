@@ -247,6 +247,10 @@ No da autoridad para pagar/reembolsar, editar Supabase/MP/GitHub, publicar build
 ni operar producción. `@lobot` de un remitente no allowlisteado no entra; para
 sumar a Joaquín primero identificar su identidad de WhatsApp y autorizarla
 explícitamente, sin wildcard.
+Al editar el config privado por SSH, conservar `uid/gid` del gateway además de
+`0600` antes de un rename atómico: SSH corre como root y un archivo nuevo de
+root puede bloquear la lectura/recarga de OpenClaw. Verificar la recarga real,
+no sólo la pertenencia al array; no ampliar permisos para corregir ownership.
 
 Railway (proyecto **lobot**, no Mango):
 
@@ -384,7 +388,10 @@ El hilo fijado **Estación híbrida Mac + PC** lleva esa investigación; no trat
 esta validación del puente como una solución de suspensión o continuidad 24/7.
 
 Incidente 2026-10-02: una mención de Joaquín quedó excluida por la allowlist
-original (sigue requiriendo autorización explícita para agregarlo). La mención
+original. Más tarde Matías autorizó explícitamente habilitarlo sólo para QA de
+lectura en ese grupo: se agregó la identidad verificada del contacto Cordi a
+`groupAllowFrom` de raíz/cuenta, sin alterar `allowFrom` ni el acceso personal.
+Su mención vieja no se reencola. La mención
 posterior de Matías sí creó job, pero falló con `workspace routing discovery
 unauthorized (401)` sin intento de entrega: el cache QA provisionado conservaba
 un login vencido aunque el login personal se había renovado. Se incorporó la
