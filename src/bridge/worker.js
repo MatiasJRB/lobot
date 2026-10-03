@@ -16,13 +16,15 @@ import { runKnowledgeQuery } from "./knowledge-query.js";
 import { collectAliQaContext } from "./ali-qa-context.js";
 import { syncAliQaAuth } from "./ali-qa-auth.js";
 import { ALI_GROUP_SOURCE, ALI_QA_CODEX_CONFIG } from "./ali-group.js";
+import { createAliIntake, intakePrompt, completeAliClassification, intakeResponse } from "./ali-intake.js";
+import { flushAliIntakeOutbox } from "./ali-intake-github.js";
 import {
   captureCommitmentJob,
   recordCommitmentDelivery,
   runCommitmentReview,
 } from "./commitment-cli.js";
 
-export const WORKER_VERSION = "0.1.1";
+export const WORKER_VERSION = "0.2.0";
 const MAX_BUSY_ATTEMPTS = 12;
 const MAX_HEARTBEAT_PREVIEW_CHARS = 240;
 
@@ -80,7 +82,7 @@ export async function runWorkerOnce({ api, codex, workerId, leaseMs = 35 * 60 * 
   aliThreadId = process.env.ALI_GROUP_CODEX_THREAD_ID,
   aliRepoCwd = process.env.ALI_GROUP_REPO_CWD,
   aliCodexHome = process.env.ALI_GROUP_CODEX_HOME,
-  personalOsSync = true,
+  personalOsSync = true, aliIntake = null, aliFlush = flushAliIntakeOutbox,
   knowledgeQuery = runKnowledgeQuery, commitmentCapture = captureCommitmentJob,
   commitmentReview = runCommitmentReview,
   commitmentDelivery = recordCommitmentDelivery }) {
@@ -93,13 +95,19 @@ export async function runWorkerOnce({ api, codex, workerId, leaseMs = 35 * 60 * 
   }
   if (personalOsSync) {
     try {
-      const pulled = await pullPersonalOsEvents(api);
+      const pulled = await pullPersonalOsEvents(api, {
+        excludeConversations: [aliIntake?.groupJid || process.env.ALI_INTAKE_GROUP_JID].filter(Boolean),
+      });
       if (pulled.quarantined) {
         console.error(`[codex-bridge] quarantined ${pulled.quarantined} invalid OpenClaw events`);
       }
     } catch (error) {
       console.error(`[codex-bridge] Personal OS event pull failed: ${error.message}`);
     }
+  }
+  if (aliIntake) {
+    try { await aliIntake.poll(api); }
+    catch { aliIntake.state.lastPollError = "event_pull_failed"; aliIntake.save(); }
   }
   const { job } = await api.claimJob(workerId, leaseMs);
   const localOnly = job && [ALI_GROUP_SOURCE, "knowledge-hub-query", "personal-os-commitment-capture",
@@ -115,6 +123,27 @@ export async function runWorkerOnce({ api, codex, workerId, leaseMs = 35 * 60 * 
     host: os.hostname(),
     threads: summarizeThreads(threads),
   });
+  if (!job && aliIntake) {
+    const messages = aliIntake.dueMessages();
+    if (messages.length && aliIntake.reserve(messages)) {
+      try {
+        if (!qaCodex || !aliThreadId || !aliRepoCwd) throw new Error("ALI QA dedicated runner is not configured");
+        if (typeof qaCodex.stop === "function") await qaCodex.stop();
+        assertAliQaHome(aliCodexHome); await aliAuthSync(aliCodexHome);
+        const prompt = intakePrompt(aliIntake, messages);
+        const context = await aliContext(prompt, { cwd: aliRepoCwd });
+        await qaCodex.start();
+        // Internal consolidation is never enqueued for WhatsApp delivery.
+        const result = await qaCodex.runAliQaJob({ id: `ali-consolidate-${messages[0].id}`,
+          source: ALI_GROUP_SOURCE, mode: "read-only", reply: { channel: "whatsapp-ali-group" }, prompt },
+        { threadId: aliThreadId, cwd: aliRepoCwd, context, intakeMessages: messages, timeoutMs: 180_000 });
+        await completeAliClassification(aliIntake, messages, result.response, { flush: aliFlush,
+          allowedIssues: (context.issues || []).filter((i) => !i.unavailable && i.state === "OPEN").map((i) => i.number) });
+      } catch { aliIntake.fail(messages); }
+      return { processed: true, intakeOnly: true };
+    }
+    try { await aliFlush(aliIntake); } catch { aliIntake.state.lastError = "github_adapter_unavailable"; aliIntake.save(); }
+  }
   if (!job) return { processed: false };
 
   try {
@@ -128,14 +157,33 @@ export async function runWorkerOnce({ api, codex, workerId, leaseMs = 35 * 60 * 
             ? await (async () => {
                 if (!qaCodex || !aliThreadId || !aliRepoCwd)
                   throw new Error("ALI QA dedicated runner is not configured");
+                const known = aliIntake?.state.messages.find((m) => m.messageId === job.reply?.sourceMessageId);
+                if (known?.status === "classified" && known.answer) {
+                  return { threadId: aliThreadId, threadName: "Asiento Libre · QA TEST",
+                    response: intakeResponse(aliIntake, [known], known.answer) };
+                }
+                if (known && known.status !== "pending") throw new Error("ALI source requires attention; no model replay");
                 // Drop any in-memory login before refreshing the private cache.
                 if (typeof qaCodex.stop === "function") await qaCodex.stop();
                 assertAliQaHome(aliCodexHome);
                 await aliAuthSync(aliCodexHome);
-                const context = await aliContext(job.prompt, { cwd: aliRepoCwd });
+                const messages = aliIntake?.mentionMessages(job) || [];
+                if (aliIntake && !messages.length) {
+                  aliIntake.state.lastError = "mention_source_not_captured"; aliIntake.save();
+                  throw new Error("ALI mention source not captured; no model fallback");
+                }
+                if (messages.length && !aliIntake.reserve(messages)) throw new Error("ALI intake model budget reached; pending human review");
+                const prompt = messages.length ? intakePrompt(aliIntake, messages) : job.prompt;
+                const context = await aliContext(prompt, { cwd: aliRepoCwd });
                 await qaCodex.start();
-                return qaCodex.runAliQaJob(job, { threadId: aliThreadId,
-                  cwd: aliRepoCwd, context, timeoutMs: leaseMs - 60_000 });
+                try {
+                  const result = await qaCodex.runAliQaJob({ ...job, prompt }, { threadId: aliThreadId,
+                    cwd: aliRepoCwd, context, intakeMessages: messages, timeoutMs: Math.min(leaseMs - 60_000, 180_000) });
+                  if (messages.length) result.response = await completeAliClassification(aliIntake, messages,
+                    result.response, { flush: aliFlush,
+                      allowedIssues: (context.issues || []).filter((i) => !i.unavailable && i.state === "OPEN").map((i) => i.number) });
+                  return result;
+                } catch (error) { if (messages.length) aliIntake.fail(messages); throw error; }
               })()
           : await codex.runJob(job, { timeoutMs: leaseMs - 60_000 });
     const completed = await api.completeJob(job.id, {
@@ -176,11 +224,11 @@ export async function runWorkerOnce({ api, codex, workerId, leaseMs = 35 * 60 * 
   }
 }
 
-export async function runWorker({ api, codex, qaCodex = null, workerId,
+export async function runWorker({ api, codex, qaCodex = null, workerId, aliIntake = null,
   pollMs = 5_000, once = false }) {
   do {
     try {
-      const result = await runWorkerOnce({ api, codex, qaCodex, workerId });
+      const result = await runWorkerOnce({ api, codex, qaCodex, workerId, aliIntake });
       if (result.processed) {
         // Resuming a Codex thread gives this app-server process its writer lock.
         // The app-server keeps that lock until the process exits, even after the
@@ -222,7 +270,8 @@ async function main() {
   };
   process.on("SIGINT", stop);
   process.on("SIGTERM", stop);
-  await runWorker({ api, codex, qaCodex, workerId, once });
+  const aliIntake = createAliIntake();
+  await runWorker({ api, codex, qaCodex, workerId, aliIntake, once });
   codex.stop();
   qaCodex.stop();
 }
