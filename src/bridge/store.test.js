@@ -40,6 +40,32 @@ test("validateJobInput restricts delivery to the personal WhatsApp channel", () 
   assert.match(validateJobInput({ prompt: "hola", mode: "danger-full-access" }), /mode/);
 });
 
+test("ALI group jobs require trusted intake, fixed read-only mode and one delivery attempt", () => {
+  const f = fixture();
+  const store = new BridgeStore(f.path, { clock: f.clock });
+  const input = {
+    source: "ali-group-mention", prompt: '{"body":"@lobot hola"}',
+    thread: "ali-group-dedicated", mode: "read-only",
+    idempotencyKey: `ali-group:${"a".repeat(64)}`,
+    reply: { channel: "whatsapp-ali-group", conversationId: "123456789012@g.us",
+      sourceMessageId: "message-1" },
+  };
+  assert.throws(() => store.enqueue(input), /trusted intake/);
+  assert.throws(() => store.enqueue({ ...input, mode: "workspace-write" },
+    { trustedAliGroup: true }), /read-only/);
+  assert.throws(() => store.enqueue({ ...input, thread: "recent" },
+    { trustedAliGroup: true }), /dedicated/);
+  const first = store.enqueue(input, { trustedAliGroup: true });
+  const repeated = store.enqueue(input, { trustedAliGroup: true });
+  assert.equal(repeated.created, false);
+  assert.equal(repeated.job.id, first.job.id);
+  store.claim("mac");
+  store.complete(first.job.id, "mac", { status: "done", response: "Hola" });
+  assert.equal(store.markDeliveryAttempted(first.job.id).deliveryAttemptedAt !== null, true);
+  assert.equal(store.markDeliveryAttempted(first.job.id), null);
+  assert.ok(new BridgeStore(f.path, { clock: f.clock }).getJob(first.job.id).deliveryAttemptedAt);
+});
+
 test("enqueue is idempotent and persists state", () => {
   const f = fixture();
   const store = new BridgeStore(f.path, { clock: f.clock });

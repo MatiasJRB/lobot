@@ -236,7 +236,168 @@ POST /bridge/api/jobs/<job-id>/deliver
 
 No exponer Codex App Server: el worker siempre inicia la conexión desde la Mac.
 El bridge rechaza `danger-full-access`, usa `read-only` por defecto y sólo
-entrega automáticamente al target personal.
+entrega automáticamente al target personal salvo la excepción QA TEST siguiente.
+
+### `@lobot` en grupo Asiento Libre · QA TEST
+
+Alcance: **un grupo exacto**, sólo remitentes en `groupAllowFrom` (inicialmente
+las variantes de Matías), mención literal `@lobot`, pregunta técnica TEST, un
+hilo Codex separado y respuesta al mismo grupo únicamente con flag de envío.
+No da autoridad para pagar/reembolsar, editar Supabase/MP/GitHub, publicar builds
+ni operar producción. `@lobot` de un remitente no allowlisteado no entra; para
+sumar a Joaquín primero identificar su identidad de WhatsApp y autorizarla
+explícitamente, sin wildcard.
+Al editar el config privado por SSH, conservar `uid/gid` del gateway además de
+`0600` antes de un rename atómico: SSH corre como root y un archivo nuevo de
+root puede bloquear la lectura/recarga de OpenClaw. Verificar la recarga real,
+no sólo la pertenencia al array; no ampliar permisos para corregir ownership.
+
+Railway (proyecto **lobot**, no Mango):
+
+```env
+ALI_GROUP_JID=<JID exacto del grupo Asiento Libre>
+ALI_GROUP_MENTIONS_ENABLED=false
+ALI_GROUP_REPLY_ENABLED=false
+PERSONAL_OS_OPENCLAW_EVENTS_ENABLED=true
+```
+
+Con `ALI_GROUP_MENTIONS_ENABLED=true`, el arranque valida plugin cargado,
+`groups` con una sola clave exacta y `requireMention=true` en raíz/cuenta,
+`groupAllowFrom` no vacío/sin wildcard; configura `groupPolicy=allowlist` sólo
+entonces. `before_dispatch` consume todos los mensajes admitidos de ese grupo,
+encola sólo los `@lobot` recientes, y suprime la respuesta Gemini. El endpoint
+de intake requiere el bearer existente, fuerza source/hilo/modo/target, deduplica
+por ID de mensaje y limita a 12 jobs/hora. Con menciones apagadas también rechaza
+POST autenticado. El flujo normal de WhatsApp propio no cambia.
+La entrega automática al grupo se rotula siempre `🤖 Ali:` en la capa de salida
+del puente, incluso si el modelo omite el rótulo; los mensajes personales que
+Matías escribe fuera del puente no se modifican.
+El hook `message_sending` cancela cualquier salida OpenClaw a ese grupo si el
+flag de respuesta está apagado o si no consume un permiso privado, de un solo
+uso y 60 segundos, creado por el servidor para el texto exacto `🤖 Ali:` del
+job. Así una caída al modelo personal no puede enviar al grupo. Esto es una
+segunda barrera de salida, no reemplaza verificar que `before_dispatch`
+intercepte antes de que el modelo personal use herramientas.
+
+Mac worker (archivo privado `~/.config/secretario-personal/codex-bridge.env`):
+
+```env
+ALI_GROUP_REPO_CWD=<checkout limpio de MatiasJRB/asiento-libre>
+ALI_GROUP_CODEX_HOME=<directorio privado aislado para QA>
+ALI_GROUP_CODEX_THREAD_ID=<ID creado por provision-ali-qa-thread.js>
+CODEX_PATH=<binario Codex vigente de ChatGPT.app>
+# Opcional: token TEST, nunca APP_USR/producción; sólo GET por payment ID explícito
+ALI_QA_MP_TEST_TOKEN=<TEST-...>
+```
+
+Crear un hilo **una sola vez** con `ALI_GROUP_REPO_CWD=... ALI_GROUP_CODEX_HOME=... CODEX_PATH=... node
+scripts/provision-ali-qa-thread.js`; el script verifica el remote y completa
+un turno bootstrap, necesario para persistir el hilo. Crea un `CODEX_HOME`
+privado `0700`, copia la credencial Codex a `auth.json` `0600` y escribe una
+configuración exacta sin MCP/apps/plugins, búsqueda web, shell, hooks ni
+multiagente. **No usar el ID de un hilo creado en el Codex home personal:** es
+otro almacén de rollouts. Reinstalar el worker con
+`scripts/install-codex-bridge-launch-agent.sh` para copiar los módulos nuevos.
+Antes de cada ejecución, el worker detiene el cliente QA anterior y sincroniza
+**sólo `auth.json`** desde el login canónico `~/.codex/auth.json` si su
+`last_refresh` es más reciente. Valida credenciales ChatGPT de la misma cuenta,
+archivos regulares privados `0600` y home privado; rechaza symlinks, cuenta
+distinta, API keys o JSON inválido con errores sin secretos. La escritura es
+atómica y nunca reemplaza un refresh más nuevo del propio QA. No copia config,
+plugins, historial ni herramientas personales. Si falla la validación, no
+inicia el modelo ni consulta contexto; revisar el login local, no quitar el
+aislamiento ni crear otro hilo para solucionar un `401`.
+La ejecución del grupo usa proceso Codex separado con entorno allowlist (sin
+tokens Bridge/GitHub/MP), `approvalPolicy=never`, sandbox `readOnly` sin red y
+checkout ALI fijo. Antes de consultar al modelo, el worker obtiene issues QA
+#463/#490, refs de issues mencionadas y estado del GitHub Project #4 mediante
+comandos `gh issue view` y `gh project item-list` de lectura. Para esas lecturas
+resuelve la credencial existente de `github.com` del usuario **MatiasJRB**, verifica
+su identidad vía `gh api user` y la pasa sólo a esos subprocesses. Nunca cambia
+la cuenta global activa de `gh`, nunca usa como fallback el token ambiental de
+otra cuenta y nunca pasa esta credencial al modelo. Si falta la credencial o la
+identidad no coincide, marca GitHub/Project como indisponibles. También consulta
+`engram search --project asiento-libre --limit 3` desde el worker; sus notas son
+históricas, nunca evidencia del estado actual. Si una fuente no responde, se
+marca indisponible; no se inventa estado. Si el mensaje nombra un `pago MP`
+o `payment_id` numérico explícito y se configuró `ALI_QA_MP_TEST_TOKEN` con
+prefijo `TEST-`, el worker hace sólo `GET /v1/payments/{id}` y pasa al modelo
+una proyección sin datos del comprador ni token. No consulta ni modifica pagos
+automáticamente fuera de ese caso. Supabase TEST no tiene adaptador automático:
+no afirmar que se verificó si no hay evidencia; para agregarlo se requiere una
+consulta acotada de lectura con RLS y sin SQL ni API mutable.
+
+**Secuencia de activación**: tests → deploy del código a Railway verificado en
+cuenta/workspace lobot → setear JID con ambos flags `false` → instalar worker y
+verificar hilo → correr smoke local sintético con reply `false` (ningún envío)
+→ inspeccionar respuesta, permisos y logs sin PII → activar menciones y observar
+una mención real allowlisteada con reply `false` → sólo con autorización explícita
+activar `ALI_GROUP_REPLY_ENABLED=true`. Una entrega de grupo se registra como
+intentada **antes** de llamar a WhatsApp; si el proveedor devuelve resultado
+incierto, no reintentar por `/jobs/:id/deliver`: revisión manual para evitar
+duplicados. Los jobs completados con reply apagado o después de 30 minutos se
+marcan suprimidos permanentemente: activar el flag no envía backlog. No usar
+una mención real del grupo para probar el envío sin acordarlo.
+El smoke local `node scripts/ali-qa-smoke.js` (con las cuatro variables `ALI_GROUP_*`
+anteriores y `CODEX_PATH`) prueba hook→API→cola→Codex→resultado sin proveedor;
+exige `group-replies-disabled` y salida válida. No envía WhatsApp.
+
+**Rollback**: poner ambos flags en `false` y redeploy/restart Railway. El
+arranque devuelve `groupPolicy=disabled` en raíz/cuenta; DM y `selfChatMode`
+quedan intactos. Luego detener/reinstalar worker si corresponde; no borrar cola
+ni hilo para evitar pérdida de evidencia. Si plugin o allowlist falla, el
+arranque aborta la habilitación de grupos.
+
+Incidente 2026-09-30: la primera mención real de Matías llegó a OpenClaw pero
+`before_dispatch` no la reclamó; Gemini publicó una respuesta no deseada.
+Se apagaron ambos flags y se verificó `groupPolicy=disabled` en raíz/cuenta.
+No reactivar hasta probar el hook real y la segunda barrera de salida: los
+tests sintéticos que llaman el handler directamente no prueban la admisión del
+runtime OpenClaw.
+
+Segunda prueba controlada 2026-09-30 (respuesta apagada): `before_dispatch`
+recibió `isGroup=true` y la mención, pero su `conversationId` no era el JID del
+grupo. El mapeador de OpenClaw 2026.9.2 elige el destinatario propio para ese
+contexto, mientras `message_received` conserva el JID correcto; la sesión
+persistida sí tiene `agent:main:whatsapp:group:<JID>`. No se creó job ni se
+observó respuesta grupal ni recibo de envío. Se apagaron ambos flags y se
+verificó otra vez `groupPolicy=disabled` en raíz/cuenta. El hook ahora reconoce
+el JID exacto mediante la clave de sesión de grupo **y** `isGroup=true`; aún
+requiere una nueva validación real autorizada antes de reactivar producción.
+
+Validación real posterior 2026-09-30 (Joaquín avisado antes de los mensajes):
+- QA 3/7, 04:27 UTC: `exactGroup=true`, `sessionGroup=true`; job
+  `e78ead8a-b76a-4dcf-922f-268afbd6cdac` completado con respuesta apagada y
+  supresión permanente, sin salida grupal.
+- QA 4/7, 12:51 UTC: job `2a1bb124-abbc-4137-af2d-51daf5911948` completado;
+  una respuesta `🤖 Ali:` entregada a las 12:52:23 UTC. GitHub/Project figuraban
+  indisponibles porque el lector heredó la cuenta ambiental de otra línea.
+  Se corrigió fijando la identidad MatiasJRB sólo para el lector, sin cambiar
+  la cuenta global ni pasar credenciales al modelo, y se reinstaló el worker.
+- QA 5/7, 13:09 UTC: job `80a1ed6b-5f94-478e-befb-2c479fea77b6` completado;
+  una respuesta entregada a las 13:10:00 UTC con lectura actual de GitHub y
+  Project (#463 OPEN/QA Running, #490 OPEN/Blocked), separada de memoria
+  histórica. No verificó ni modificó pagos, Supabase o producción.
+
+La captura y salida del puente quedaron verificadas con ambos flags encendidos,
+un solo grupo exacto y el worker instalado. La continuidad física es distinta:
+macOS registró `Clamshell Sleep` aun con alimentación AC y `caffeinate`; las
+pruebas exitosas posteriores fueron con Mac accesible/tapa abierta. No se
+desactivó el bloqueo de seguridad ni se validó funcionamiento con tapa cerrada.
+El hilo fijado **Estación híbrida Mac + PC** lleva esa investigación; no tratar
+esta validación del puente como una solución de suspensión o continuidad 24/7.
+
+Incidente 2026-10-02: una mención de Joaquín quedó excluida por la allowlist
+original. Más tarde Matías autorizó explícitamente habilitarlo sólo para QA de
+lectura en ese grupo: se agregó la identidad verificada del contacto Cordi a
+`groupAllowFrom` de raíz/cuenta, sin alterar `allowFrom` ni el acceso personal.
+Su mención vieja no se reencola. La mención
+posterior de Matías sí creó job, pero falló con `workspace routing discovery
+unauthorized (401)` sin intento de entrega: el cache QA provisionado conservaba
+un login vencido aunque el login personal se había renovado. Se incorporó la
+sincronización privada anterior; no se reencolan menciones viejas ni se envían
+mensajes nuevos al grupo para probar esta reparación. No fue una suspensión de
+la Mac.
 
 Calendar write opcional:
 

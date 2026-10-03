@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { ALI_GROUP_REPLY_CHANNEL, ALI_GROUP_SOURCE } from "./ali-group.js";
 
 const STATE_VERSION = 1;
 const DEFAULT_LEASE_MS = 5 * 60 * 1000;
@@ -45,7 +46,7 @@ export function normalizeThreadSelector(value) {
   return { kind: "title", value: selector };
 }
 
-export function validateJobInput(input) {
+export function validateJobInput(input, { trustedAliGroup = false } = {}) {
   if (!input || typeof input !== "object") return "Body must be an object";
   const prompt = typeof input.prompt === "string" ? input.prompt.trim() : "";
   if (!prompt) return "prompt is required";
@@ -59,10 +60,13 @@ export function validateJobInput(input) {
   if (input.idempotencyKey !== undefined && typeof input.idempotencyKey !== "string") {
     return "idempotencyKey must be a string";
   }
+  if ((input.source === ALI_GROUP_SOURCE || input.reply?.channel === ALI_GROUP_REPLY_CHANNEL) &&
+      !trustedAliGroup) return "ALI group jobs require trusted intake";
   if (input.reply !== undefined) {
     if (!input.reply || typeof input.reply !== "object") return "reply must be an object";
-    if (input.reply.channel !== "whatsapp-self") {
-      return "reply.channel must be whatsapp-self";
+    if (input.reply.channel !== "whatsapp-self" &&
+        !(trustedAliGroup && input.reply.channel === ALI_GROUP_REPLY_CHANNEL)) {
+      return "reply.channel must be whatsapp-self unless trusted ALI group intake";
     }
     if (
       input.reply.policy !== undefined &&
@@ -70,6 +74,19 @@ export function validateJobInput(input) {
     ) {
       return "reply.policy must be always or actionable-only";
     }
+  }
+  if (input.source === ALI_GROUP_SOURCE || input.reply?.channel === ALI_GROUP_REPLY_CHANNEL) {
+    if (!trustedAliGroup) return "ALI group jobs require trusted intake";
+    if (input.source !== ALI_GROUP_SOURCE || input.reply?.channel !== ALI_GROUP_REPLY_CHANNEL)
+      return "ALI group source and reply must match";
+    if (input.mode !== "read-only") return "ALI group jobs must be read-only";
+    if (input.thread !== "ali-group-dedicated") return "ALI group jobs require dedicated thread";
+    if (input.cwd !== undefined) return "ALI group cwd is fixed by worker";
+    if (!/^ali-group:[a-f0-9]{64}$/.test(input.idempotencyKey || ""))
+      return "ALI group idempotency key is invalid";
+    if (!/^\d{10,25}@g\.us$/.test(input.reply?.conversationId || "") ||
+        typeof input.reply?.sourceMessageId !== "string")
+      return "ALI group reply target is invalid";
   }
   return null;
 }
@@ -103,8 +120,8 @@ export class BridgeStore {
     fs.renameSync(temporaryPath, this.statePath);
   }
 
-  enqueue(input) {
-    const validationError = validateJobInput(input);
+  enqueue(input, { trustedAliGroup = false } = {}) {
+    const validationError = validateJobInput(input, { trustedAliGroup });
     if (validationError) throw new TypeError(validationError);
 
     const idempotencyKey = input.idempotencyKey?.trim() || null;
@@ -135,6 +152,8 @@ export class BridgeStore {
       response: null,
       error: null,
       deliveredAt: null,
+      deliveryAttemptedAt: null,
+      groupReplySuppressedAt: null,
     };
     this.state.jobs.push(job);
     this.#save();
@@ -152,6 +171,15 @@ export class BridgeStore {
       .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
       .slice(0, Math.max(1, Math.min(limit, 200)))
       .map(clone);
+  }
+
+  countRecentSource(source, sinceMs) {
+    return this.state.jobs.filter((job) => job.source === source &&
+      Date.parse(job.createdAt) > sinceMs).length;
+  }
+
+  hasIdempotencyKey(idempotencyKey) {
+    return this.state.jobs.some((job) => job.idempotencyKey === idempotencyKey);
   }
 
   claim(workerId, { leaseMs = DEFAULT_LEASE_MS } = {}) {
@@ -220,6 +248,30 @@ export class BridgeStore {
     if (!job.deliveredAt) {
       job.deliveredAt = nowIso(this.clock());
       job.updatedAt = job.deliveredAt;
+      this.#save();
+    }
+    return clone(job);
+  }
+
+  // Claim *before* calling WhatsApp. A lost/ambiguous provider response must
+  // never cause an automatic second group message.
+  markDeliveryAttempted(jobId) {
+    const job = this.state.jobs.find((candidate) => candidate.id === jobId);
+    if (!job || job.deliveryAttemptedAt || job.groupReplySuppressedAt) return null;
+    if (job.source !== ALI_GROUP_SOURCE || job.status !== "done") return null;
+    job.deliveryAttemptedAt = nowIso(this.clock());
+    job.updatedAt = job.deliveryAttemptedAt;
+    this.#save();
+    return clone(job);
+  }
+
+  markGroupReplySuppressed(jobId) {
+    const job = this.state.jobs.find((candidate) => candidate.id === jobId);
+    if (!job || job.source !== ALI_GROUP_SOURCE || job.status !== "done" ||
+        job.deliveryAttemptedAt) return null;
+    if (!job.groupReplySuppressedAt) {
+      job.groupReplySuppressedAt = nowIso(this.clock());
+      job.updatedAt = job.groupReplySuppressedAt;
       this.#save();
     }
     return clone(job);

@@ -71,7 +71,8 @@ test("outbound hook distinguishes provider acceptance from uncertain and failed 
     on: (name) => hooks.push(name),
     registerTool: (tool, options) => tools.push({ tool, options }),
   });
-  assert.deepEqual(hooks, ["message_received", "message_sent"]);
+  assert.deepEqual(hooks, ["message_received", "message_sent", "message_sending",
+    "before_dispatch"]);
   assert.equal(tools[0].tool, plugin.knowledgeTool);
   assert.deepEqual(tools[0].options, { name: "knowledge_search" });
   assert.equal(tools[1].tool, plugin.commitmentTool);
@@ -91,6 +92,77 @@ test("outbound hook distinguishes provider acceptance from uncertain and failed 
   assert.equal(plugin.projectSent({ to: "chat-1", content: "hola", success: true },
     { ...context, channelId: "telegram" }), null);
   assert.equal(plugin.projectSent({ to: "other", content: "hola", success: true }, context), null);
+});
+
+test("ALI group hook suppresses OpenClaw and enqueues only a fresh literal @lobot mention", async () => {
+  const groupJid = "123456789012@g.us";
+  const requests = [];
+  const options = {
+    env: { ALI_GROUP_JID: groupJid, ALI_GROUP_MENTIONS_ENABLED: "true",
+      CODEX_BRIDGE_TOKEN: "test-token", PORT: "8080" },
+    now: () => Date.parse("2026-09-30T01:00:00Z"),
+    request: async (_url, _token, pathname, request) => {
+      requests.push([pathname, JSON.parse(request.body)]);
+      return { ok: true, created: true };
+    },
+  };
+  const context = { channelId: "whatsapp", accountId: "default",
+    conversationId: "+5491112345678",
+    sessionKey: `agent:main:whatsapp:group:${groupJid}`,
+    messageId: "provider-1", senderId: "+5491112345678" };
+  const event = { isGroup: true, messageId: "provider-1", body: "@lobot ¿cómo probamos débito?",
+    content: "Pregunta previa de QA.\n@lobot ¿cómo probamos débito?",
+    timestamp: Date.parse("2026-09-30T00:59:00Z") };
+  assert.deepEqual(await plugin.handleAliGroupMention(event, context, options), { handled: true });
+  assert.equal(requests.length, 1);
+  assert.deepEqual(await plugin.handleAliGroupMention({ ...event,
+    messageId: 'provider-2' }, { ...context, conversationId: groupJid,
+    messageId: 'provider-2' }, options),
+  { handled: true });
+  assert.equal(requests.length, 2);
+  assert.equal(requests[0][0], "/ali-group/mentions");
+  assert.equal(requests[0][1].body, event.body);
+  assert.equal(requests[0][1].messageId, "provider-1");
+
+  assert.deepEqual(await plugin.handleAliGroupMention({ ...event, body: "hola" }, context, options),
+    { handled: true });
+  assert.equal(requests.length, 2);
+  assert.equal(await plugin.handleAliGroupMention(event, { ...context,
+    sessionKey: "agent:main:whatsapp:group:another@g.us" }, options), undefined);
+  assert.equal(await plugin.handleAliGroupMention({ ...event, isGroup: false },
+    context, options), undefined);
+  assert.equal(await plugin.handleAliGroupMention(event, { ...context,
+    channelId: "discord" }, options), undefined);
+  assert.deepEqual(await plugin.handleAliGroupMention({ ...event,
+    timestamp: Date.parse("2026-09-29T23:00:00Z") }, context, options), { handled: true });
+  assert.equal(requests.length, 2);
+  assert.deepEqual(await plugin.handleAliGroupMention(event, context,
+    { ...options, env: { ...options.env, ALI_GROUP_MENTIONS_ENABLED: "false" } }),
+  { handled: true });
+  assert.deepEqual(await plugin.handleAliGroupMention({ ...event,
+    body: '🤖 Ali: @lobot ya respondió' }, context, options), { handled: true });
+  assert.equal(requests.length, 2);
+});
+
+test('ALI group outbound guard blocks generic OpenClaw replies and only accepts a permit', () => {
+  const groupJid = '123456789012@g.us';
+  const ctx = { channelId: 'whatsapp', accountId: 'default', conversationId: groupJid };
+  const event = { to: groupJid, content: 'Gemini replied without bridge' };
+  const disabled = { ALI_GROUP_JID: groupJid, ALI_GROUP_REPLY_ENABLED: 'false' };
+  assert.equal(plugin.guardAliGroupOutbound(event, ctx, { env: disabled }).cancel, true);
+  assert.equal(plugin.guardAliGroupOutbound(event,
+    { ...ctx, conversationId: '+5491112345678' }, { env: disabled }).cancel, true);
+  const enabled = { ...disabled, ALI_GROUP_REPLY_ENABLED: 'true' };
+  assert.equal(plugin.guardAliGroupOutbound(event, ctx, { env: enabled }).cancel, true);
+  let consumed = 0;
+  const bridgeEvent = { ...event, content: '🤖 Ali:\n\nRespuesta TEST.' };
+  assert.equal(plugin.guardAliGroupOutbound(bridgeEvent, ctx, { env: enabled,
+    consumePermit: () => { consumed++; return true; } }), undefined);
+  assert.equal(consumed, 1);
+  assert.equal(plugin.guardAliGroupOutbound(bridgeEvent,
+    { ...ctx, conversationId: 'other@g.us' }, { env: enabled }).cancel, true);
+  assert.equal(plugin.guardAliGroupOutbound({ ...event, to: 'other@g.us' },
+    { ...ctx, conversationId: 'other@g.us' }, { env: enabled }), undefined);
 });
 
 test("owner-only knowledge tool waits for the local bridge result", async () => {

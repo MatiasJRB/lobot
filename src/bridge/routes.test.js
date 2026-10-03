@@ -10,13 +10,16 @@ import express from "express";
 import { createBridgeRouter } from "./routes.js";
 import { BridgeStore } from "./store.js";
 
-async function fixture({ deliverJob, openclawEventOutbox, noticeOutbox } = {}) {
+async function fixture({ deliverJob, openclawEventOutbox, noticeOutbox,
+  aliGroupJid = "", aliGroupIntakeEnabled = true,
+  aliGroupReplyEnabled = false } = {}) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "codex-bridge-routes-"));
   const store = new BridgeStore(path.join(directory, "state.json"));
   const app = express();
   app.use(express.json());
   app.use("/bridge/api", createBridgeRouter({ store, token: "test-token", deliverJob,
-    openclawEventOutbox, noticeOutbox, noticeWriteToken: "notice-only" }));
+    openclawEventOutbox, noticeOutbox, noticeWriteToken: "notice-only",
+    aliGroupJid, aliGroupIntakeEnabled, aliGroupReplyEnabled }));
   const server = http.createServer(app);
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address();
@@ -36,6 +39,114 @@ async function fixture({ deliverJob, openclawEventOutbox, noticeOutbox } = {}) {
     },
   };
 }
+
+test("ALI group intake is exact, idempotent, read-only and cannot be forged through /jobs", async (t) => {
+  const groupJid = "123456789012@g.us";
+  const f = await fixture({ aliGroupJid: groupJid });
+  t.after(() => f.server.close());
+  const mention = { accountId: "default", conversationId: groupJid,
+    messageId: "msg-1", senderId: "+5491112345678", timestamp: Date.now(),
+    body: "@lobot ¿cómo se usa débito TEST?" };
+  assert.equal((await fetch(`${f.url}/ali-group/mentions`, { method: "POST",
+    headers: { "content-type": "application/json" }, body: JSON.stringify(mention) })).status, 401);
+  assert.equal((await f.request("/jobs", { method: "POST", body: JSON.stringify({
+    source: "ali-group-mention", prompt: "x", mode: "read-only",
+  }) })).status, 400);
+  assert.equal((await f.request("/ali-group/mentions", { method: "POST",
+    body: JSON.stringify({ ...mention, conversationId: "other@g.us" }) })).status, 400);
+  const first = await f.request("/ali-group/mentions", { method: "POST", body: JSON.stringify(mention) });
+  const second = await f.request("/ali-group/mentions", { method: "POST", body: JSON.stringify(mention) });
+  assert.equal(first.status, 202);
+  assert.equal(second.status, 200);
+  const one = await first.json();
+  assert.equal(one.jobId, (await second.json()).jobId);
+  const job = f.store.getJob(one.jobId);
+  assert.equal(job.mode, "read-only");
+  assert.equal(job.reply.conversationId, groupJid);
+});
+
+test("ALI group intake flag blocks even an authenticated direct POST", async (t) => {
+  const groupJid = "123456789012@g.us";
+  const f = await fixture({ aliGroupJid: groupJid, aliGroupIntakeEnabled: false });
+  t.after(() => f.server.close());
+  const result = await f.request("/ali-group/mentions", { method: "POST",
+    body: JSON.stringify({ accountId: "default", conversationId: groupJid,
+      messageId: "disabled", senderId: "+5491112345678", timestamp: Date.now(),
+      body: "@lobot TEST" }) });
+  assert.equal(result.status, 503);
+  assert.equal(f.store.listJobs().length, 0);
+});
+
+test("ALI group reply stays off by default and sends at most once when enabled", async (t) => {
+  const groupJid = "123456789012@g.us";
+  const deliveries = [];
+  const f = await fixture({ aliGroupJid: groupJid, deliverJob: async (job) => {
+    deliveries.push(job.id);
+    throw new Error("uncertain provider result");
+  } });
+  t.after(() => f.server.close());
+  const mention = { accountId: "default", conversationId: groupJid,
+    messageId: "msg-2", senderId: "+5491112345678", timestamp: Date.now(), body: "@lobot TEST" };
+  const created = await (await f.request("/ali-group/mentions", { method: "POST",
+    body: JSON.stringify(mention) })).json();
+  await f.request("/jobs/claim", { method: "POST", body: JSON.stringify({ workerId: "mac" }) });
+  const complete = await (await f.request(`/jobs/${created.jobId}/complete`, { method: "POST",
+    body: JSON.stringify({ workerId: "mac", status: "done", response: "Usá una tarjeta TEST." }) })).json();
+  assert.equal(complete.delivery.reason, "group-replies-disabled");
+  assert.deepEqual(deliveries, []);
+  assert.ok(f.store.getJob(created.jobId).groupReplySuppressedAt);
+  const suppressed = await (await f.request(`/jobs/${created.jobId}/deliver`,
+    { method: "POST" })).json();
+  assert.equal(suppressed.delivery.reason, "group-reply-suppressed");
+  const enabled = await fixture({ aliGroupJid: groupJid, aliGroupReplyEnabled: true,
+    deliverJob: async (job) => { deliveries.push(job.id); throw new Error("uncertain provider result"); } });
+  t.after(() => enabled.server.close());
+  const other = await (await enabled.request("/ali-group/mentions", { method: "POST",
+    body: JSON.stringify({ ...mention, messageId: "msg-3" }) })).json();
+  await enabled.request("/jobs/claim", { method: "POST", body: JSON.stringify({ workerId: "mac" }) });
+  const failed = await (await enabled.request(`/jobs/${other.jobId}/complete`, { method: "POST",
+    body: JSON.stringify({ workerId: "mac", status: "done", response: "Usá una tarjeta TEST." }) })).json();
+  assert.equal(failed.delivery.attempted, true);
+  assert.equal(deliveries.length, 1);
+  const retry = await (await enabled.request(`/jobs/${other.jobId}/deliver`, { method: "POST" })).json();
+  assert.equal(retry.delivery.attempted, false);
+  assert.equal(deliveries.length, 1);
+});
+
+test("ALI group never sends an old completed answer after a delayed worker", async (t) => {
+  const groupJid = "123456789012@g.us";
+  const delivered = [];
+  const f = await fixture({ aliGroupJid: groupJid, aliGroupReplyEnabled: true,
+    deliverJob: async (job) => delivered.push(job.id) });
+  t.after(() => f.server.close());
+  const created = await (await f.request("/ali-group/mentions", { method: "POST",
+    body: JSON.stringify({ accountId: "default", conversationId: groupJid,
+      messageId: "msg-old", senderId: "+5491112345678", timestamp: Date.now(),
+      body: "@lobot TEST" }) })).json();
+  f.store.state.jobs[0].createdAt = new Date(Date.now() - 60 * 60_000).toISOString();
+  await f.request("/jobs/claim", { method: "POST", body: JSON.stringify({ workerId: "mac" }) });
+  const complete = await (await f.request(`/jobs/${created.jobId}/complete`, { method: "POST",
+    body: JSON.stringify({ workerId: "mac", status: "done", response: "Respuesta" }) })).json();
+  assert.equal(complete.delivery.reason, "stale-group-reply-suppressed");
+  assert.deepEqual(delivered, []);
+});
+
+test("ALI group intake caps unique mentions but accepts duplicate IDs", async (t) => {
+  const groupJid = "123456789012@g.us";
+  const f = await fixture({ aliGroupJid: groupJid });
+  t.after(() => f.server.close());
+  const event = { accountId: "default", conversationId: groupJid,
+    senderId: "+5491112345678", timestamp: Date.now(), body: "@lobot TEST" };
+  for (let index = 0; index < 12; index += 1) {
+    const result = await f.request("/ali-group/mentions", { method: "POST",
+      body: JSON.stringify({ ...event, messageId: `rate-${index}` }) });
+    assert.equal(result.status, 202);
+  }
+  assert.equal((await f.request("/ali-group/mentions", { method: "POST",
+    body: JSON.stringify({ ...event, messageId: "rate-0" }) })).status, 200);
+  assert.equal((await f.request("/ali-group/mentions", { method: "POST",
+    body: JSON.stringify({ ...event, messageId: "rate-12" }) })).status, 429);
+});
 
 test("notices use a separate write-only token, durable feed and idempotency", async (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "personal-os-notices-"));
