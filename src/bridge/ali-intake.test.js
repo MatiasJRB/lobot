@@ -162,6 +162,21 @@ test("missing uncertain receipt never causes a second POST", async (t) => {
   assert.equal(writes, 1);
 });
 
+test("new issue lost receipt recovers its issue number without creating a duplicate", async (t) => {
+  const f = fixture(t); classified(f, null); let writes = 0; let body = null;
+  const gh = (args, input) => {
+    if (args.includes("POST")) { writes++; body = input.body; throw new Error("lost receipt after creation"); }
+    if (args[0] === "project") return { id: "project-item" };
+    if (args[1].includes("issues?")) return [body ? [{ number: 510, body, html_url: "https://github.com/MatiasJRB/asiento-libre/issues/510" }] : []];
+    throw new Error("unexpected call");
+  };
+  await flushAliIntakeOutbox(f.journal, { ghFactory: () => gh });
+  f.advance(300_000);
+  await flushAliIntakeOutbox(f.journal, { ghFactory: () => gh });
+  assert.equal(writes, 1); assert.equal(f.journal.state.outbox[0].targetIssue, 510);
+  assert.equal(f.journal.state.outbox[0].status, "written");
+});
+
 test("GitHub adapter rejects another account and never falls back to ambient token", () => {
   const envs = [];
   assert.throws(() => aliIntakeGh({ env: { GH_TOKEN: "other-token" }, exec(_cmd, args, options) {
