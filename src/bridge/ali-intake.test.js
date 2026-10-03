@@ -252,11 +252,13 @@ test("structured model contract supplies bounded evidence while tools remain dis
   const { CodexAppServerClient } = await import("./app-server-client.js");
   const c = new CodexAppServerClient(); const calls = [];
   const tid = "0199abcd-aaaa-bbbb-cccc-123456789012";
-  c.request = async (method, params) => { calls.push(params); return method === "thread/resume" ? { thread: { id: tid } } : { turn: { id: "t" } }; };
+  c.request = async (method, params) => { calls.push(params); return method.startsWith("thread/") ? { thread: { id: tid } } : { turn: { id: "t" } }; };
   c.waitForTurn = async () => ({ status: "completed", items: [{ type: "agentMessage", phase: "final_answer", text: '{"answer":"Sí","items":[]}' }] });
   await c.runAliQaJob({ id: "x", source: "ali-group-mention", mode: "read-only", reply: { channel: "whatsapp-ali-group" }, prompt: '{}' },
     { threadId: tid, cwd: "/ali", context: {}, intakeMessages: [{ id: "id1", body: "Definition", author: "Joaquín", at: "2026-10-03T03:00:00Z" }] });
   assert.match(calls[0].developerInstructions, /Salida obligatoria JSON/);
+  assert.equal(calls[0].ephemeral, true);
   assert.match(calls[1].input[0].text, /id1/);
   assert.deepEqual(calls[1].sandboxPolicy, { type: "readOnly", networkAccess: false });
+  assert.deepEqual(calls[1].outputSchema.properties.items.items.properties.sourceIds.items.enum, ["id1"]);
 });

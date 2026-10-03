@@ -12,7 +12,7 @@ Límites iniciales: 2 llamadas por ventana, 8 por hora móvil y 20 por día móv
 
 ## Registro y permisos
 
-El modelo conserva config/home/hilo QA preexistentes, sandbox read-only sin red ni herramientas y entorno sin credenciales Bridge/GitHub/MP. Devuelve JSON con consulta sin ítems, `definition`, `task` o `clarify`; confianza baja se convierte en punto por aclarar. Sólo cita mensajes actuales capturados. Un target issue sólo se admite si la lectura de contexto lo verificó abierto.
+El modelo conserva config/home QA y el ID de ejecutor configurado, sandbox read-only sin red ni herramientas y entorno sin credenciales Bridge/GitHub/MP. Para intake usa una ejecución efímera dentro de ese home aislado, sin crear chat humano ni acumular historial: el contexto anterior pertinente viene acotado del journal. Devuelve JSON con schema nativo y consulta sin ítems, `definition`, `task` o `clarify`; confianza baja se convierte en punto por aclarar. Sólo cita mensajes actuales capturados. Un target issue sólo se admite si la lectura de contexto lo verificó abierto.
 
 El adaptador separado resuelve la credencial existente MatiasJRB y verifica identidad sin cambiar cuenta global. Sólo crea issues/comentarios en `MatiasJRB/asiento-libre` y agrega al Project4. No modifica definiciones antiguas, cierra issues ni cambia estados activos. Nuevos registros quedan pendientes; un receipt es la única fuente para afirmar registro. No autoriza operaciones de producto/dinero.
 

@@ -310,18 +310,37 @@ export class CodexAppServerClient extends EventEmitter {
         JSON.stringify(intakeMessages.map(({ id, author, at, body }) => ({ id, author, at, body })))] : []),
       "Respondé sólo la pregunta actual con el mínimo de contexto pertinente.",
     ].join("\n");
-    const resumed = await this.request("thread/resume", {
-      threadId, cwd, approvalPolicy: "never", sandbox: "read-only",
-      developerInstructions: instructions,
-    });
+    // Structured intake supplies its own bounded context. Do not grow a persistent
+    // transcript and charge its entire history again on every future classification.
+    const resumed = intakeMessages.length
+      ? await this.request("thread/start", { ephemeral: true, cwd,
+        approvalPolicy: "never", sandbox: "read-only", developerInstructions: instructions })
+      : await this.request("thread/resume", { threadId, cwd,
+        approvalPolicy: "never", sandbox: "read-only", developerInstructions: instructions });
+    const activeThreadId = resumed.thread.id;
     const startedTurn = await this.request("turn/start", {
       threadId: resumed.thread.id,
       clientUserMessageId: job.id,
       input: [{ type: "text", text: prompt, text_elements: [] }],
       cwd, approvalPolicy: "never",
       sandboxPolicy: { type: "readOnly", networkAccess: false },
+      ...(intakeMessages.length ? { outputSchema: {
+        type: "object", additionalProperties: false, required: ["answer", "items"], properties: {
+          answer: { type: "string", minLength: 1, maxLength: 1800 },
+          items: { type: "array", maxItems: 3, items: { type: "object", additionalProperties: false,
+            required: ["kind", "title", "summary", "sourceIds", "confidence", "issue"], properties: {
+              kind: { type: "string", enum: ["definition", "task", "clarify"] },
+              title: { type: "string", minLength: 1, maxLength: 160 },
+              summary: { type: "string", minLength: 1, maxLength: 1600 },
+              sourceIds: { type: "array", minItems: 1, maxItems: 16, uniqueItems: true,
+                items: { type: "string", enum: intakeMessages.map((m) => m.id) } },
+              confidence: { type: "number", minimum: 0, maximum: 1 },
+              issue: { enum: [null, ...(context?.issues || []).filter((i) => !i.unavailable && i.state === "OPEN").map((i) => i.number)] },
+            } } },
+        },
+      } } : {}),
     });
-    const turn = await this.waitForTurn(threadId, startedTurn.turn.id, timeoutMs);
+    const turn = await this.waitForTurn(activeThreadId, startedTurn.turn.id, timeoutMs);
     if (turn.status !== "completed") {
       throw new Error(turn.error?.message || `ALI QA turn ended ${turn.status}`);
     }
@@ -331,7 +350,7 @@ export class CodexAppServerClient extends EventEmitter {
     }
     const response = extractFinalResponse(turn);
     if (!response) throw new Error("ALI QA turn has no final answer");
-    return { threadId, threadName: "Asiento Libre · QA TEST", response };
+    return { threadId: activeThreadId, threadName: "Asiento Libre · QA TEST", response };
   }
 
   waitForTurn(threadId, turnId, timeoutMs) {
