@@ -144,6 +144,29 @@ test("ALI group hook suppresses OpenClaw and enqueues only a fresh literal @lobo
   assert.equal(requests.length, 2);
 });
 
+test('silent ALI reception never invokes a model, even through account-qualified session keys or bridge errors', async () => {
+  const groupJid = '123456789012@g.us';
+  const context = { channelId: 'whatsapp', accountId: 'default',
+    conversationId: 'self', sessionKey: `agent:main:whatsapp:default:group:${groupJid}`,
+    messageId: 'new-message', senderId: 'self' };
+  let requests = 0;
+  const options = { env: { ALI_GROUP_JID: groupJid, ALI_GROUP_MENTIONS_ENABLED: 'true',
+    CODEX_BRIDGE_TOKEN: 'local-test' }, now: () => 1791070000000,
+    request: async () => { requests++; throw new Error('queue unavailable'); } };
+  const event = { isGroup: true, timestamp: 1791070000000 };
+  for (const body of ['hola', 'Ali, mirá esto', 'respondió Joaquín',
+    '🤖 Ali: @lobot respuesta propia', 'Lobot · QA ALI @lobot respuesta propia']) {
+    assert.deepEqual(await plugin.handleAliGroupMention({ ...event, body }, context, options),
+      { handled: true });
+  }
+  assert.equal(requests, 0);
+  assert.deepEqual(await plugin.handleAliGroupMention({ ...event, body: '@lobot consulta real' },
+    context, options), { handled: true });
+  assert.equal(requests, 1);
+  assert.equal(plugin.decisionResponseFrom({ content: 'B', timestamp: event.timestamp },
+    { ...context, conversationId: groupJid }, options), null);
+});
+
 test('ALI group outbound guard blocks generic OpenClaw replies and only accepts a permit', () => {
   const groupJid = '123456789012@g.us';
   const ctx = { channelId: 'whatsapp', accountId: 'default', conversationId: groupJid };
@@ -216,4 +239,29 @@ test("owner-only commitment tool queues a synchronous structured capture", async
   const payload = JSON.parse(job.prompt);
   assert.equal(payload.source_ref.startsWith("openclaw-tool:"), true);
   assert.deepEqual(payload.channels, ["whatsapp-self"]);
+});
+
+test("exact decision replies bypass the model and enter the typed write-only route", async () => {
+  const content = "DECIDIR choose_waiting_owner V1 B";
+  const event = { messageId: "message-1", senderId: "self", content,
+    timestamp: 1791041892000 };
+  const context = { channelId: "whatsapp", accountId: "default",
+    conversationId: "self", messageId: "message-1", senderId: "self" };
+  const payload = plugin.decisionResponseFrom(event, context);
+  assert.equal(payload.content, content);
+  assert.equal(payload.message_id, "message-1");
+  assert.equal(plugin.decisionResponseFrom({ ...event, content: "B" }, context).content, "B");
+  assert.equal(plugin.decisionResponseFrom({ ...event, content: "sí" }, context), null);
+  const calls = [];
+  const queued = await plugin.queueDecisionBridge(payload, {
+    baseUrl: "https://bridge.test", token: "write-only",
+    request: async (_base, token, pathname, options) => {
+      calls.push({ token, pathname, options });
+      return { jobId: "job-1", created: true };
+    },
+  });
+  assert.deepEqual(queued, { queued: true, jobId: "job-1", created: true });
+  assert.equal(calls[0].token, "write-only");
+  assert.equal(calls[0].pathname, "/personal-os/decisions");
+  assert.equal(JSON.parse(calls[0].options.body).sender_id, "self");
 });

@@ -6,6 +6,20 @@ import path from "node:path";
 import { test } from "node:test";
 import { pullPersonalOsEvents } from "./personal-os-events.js";
 
+test("ALI product conversation is excluded from Secretary inbox and quarantine while cursor advances", async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "personal-os-ali-exclude-"));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const group = "123456789012@g.us";
+  const events = [{ conversation_id: group, content_preview: "ALI private product definition" },
+    { event_type: "delivery_receipt", conversation_id: group, private: "receipt" }];
+  const api = { async listPersonalOsEvents() { return { ok: true, events, nextCursor: 123, hasMore: false }; } };
+  const result = await pullPersonalOsEvents(api, { directory, excludeConversations: [group] });
+  assert.deepEqual(result, { imported: 0, quarantined: 0, cursor: 123 });
+  assert.equal(fs.existsSync(path.join(directory, "openclaw-events.ndjson")), false);
+  assert.equal(fs.existsSync(path.join(directory, "openclaw-events-quarantine.ndjson")), false);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(directory, "openclaw-event-cursor.json"))).cursor, 123);
+});
+
 test("Mac bridge durably polls private attributed events without card inference", async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "personal-os-pull-"));
   fs.chmodSync(directory, 0o700);

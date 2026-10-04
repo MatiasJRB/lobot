@@ -18,6 +18,9 @@ const COMMITMENT_REQUIRED = ["card_id", "title", "domain", "outcome", "status",
   "priority", "owner", "current_state", "next_action", "next_check_at",
   "closure_condition", "source_ref", "material_kind", "progress_state",
   "deadline_at", "identities"];
+const SECRETARY_THREAD_ID = "01a06a2f-947e-7f12-af6c-fd294cf94324";
+const DECISION_COMMAND = /^DECIDIR [a-z][a-z0-9_]{2,79} V[1-9][0-9]{0,8} [A-Z0-9_-]{1,20}$/;
+const DECISION_CHOICE = /^[A-Z0-9_-]{1,20}$/;
 
 function validZonedDate(value) {
   return typeof value === "string" && /(?:Z|[+-]\d\d:\d\d)$/.test(value) &&
@@ -46,6 +49,31 @@ export function validateCommitmentIntake(body) {
     return "identities must contain 1-10 TYPE:VALUE strings";
   }
   if (Buffer.byteLength(JSON.stringify(commitment)) > 20_000) return "commitment is too large";
+  return null;
+}
+
+export function validateDecisionIntake(body) {
+  if (!body || typeof body !== "object" || body.version !== 1) {
+    return "decision response version must be 1";
+  }
+  const allowed = new Set(["version", "message_id", "account_id", "conversation_id",
+    "sender_id", "occurred_at", "content", "content_sha256"]);
+  if (Object.keys(body).some((key) => !allowed.has(key))) {
+    return "unsupported decision response fields";
+  }
+  for (const field of ["message_id", "account_id", "conversation_id", "sender_id",
+    "occurred_at", "content", "content_sha256"]) {
+    if (typeof body[field] !== "string" || !body[field].trim() || body[field].length > 500) {
+      return `${field} is required (<=500 characters)`;
+    }
+  }
+  if (!DECISION_COMMAND.test(body.content) && !DECISION_CHOICE.test(body.content)) {
+    return "invalid exact decision command or choice";
+  }
+  if (!/^[a-f0-9]{64}$/.test(body.content_sha256)) return "invalid content_sha256";
+  if (!validZonedDate(body.occurred_at)) return "occurred_at must be a zoned ISO-8601 datetime";
+  const expected = crypto.createHash("sha256").update(body.content).digest("hex");
+  if (!secureEqual(body.content_sha256, expected)) return "content_sha256 does not match content";
   return null;
 }
 
@@ -91,6 +119,24 @@ export function createBridgeRouter({ store, token, deliverJob = null,
         mode: "workspace-write",
         idempotencyKey: `commitment-ingest:${req.body.idempotencyKey.trim()}`,
         source: "personal-os-commitment-capture",
+      });
+      return res.status(result.created ? 202 : 200).json({ ok: true,
+        jobId: result.job.id, created: result.created });
+    } catch (queueError) {
+      return res.status(400).json({ ok: false, error: queueError.message });
+    }
+  });
+  router.post("/personal-os/decisions", bearerAuth(noticeWriteToken), (req, res) => {
+    const error = validateDecisionIntake(req.body);
+    if (error) return res.status(400).json({ ok: false, error });
+    try {
+      const result = store.enqueue({
+        prompt: JSON.stringify(req.body),
+        thread: SECRETARY_THREAD_ID,
+        mode: "workspace-write",
+        idempotencyKey: `decision-message:${req.body.message_id}`,
+        source: "personal-os-decision-apply",
+        reply: { channel: "whatsapp-self", policy: "always" },
       });
       return res.status(result.created ? 202 : 200).json({ ok: true,
         jobId: result.job.id, created: result.created });

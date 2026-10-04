@@ -47,7 +47,7 @@ function validateEvent(event) {
 }
 
 export async function pullPersonalOsEvents(api, { directory = DEFAULT_PERSONAL_OS_EVENT_DIR,
-  maxPages = 5 } = {}) {
+  maxPages = 5, excludeConversations = [] } = {}) {
   const dirStat = fs.statSync(directory);
   if (!dirStat.isDirectory() || (dirStat.mode & 0o077) !== 0) {
     throw new Error("Personal OS event directory is not private");
@@ -66,8 +66,10 @@ export async function pullPersonalOsEvents(api, { directory = DEFAULT_PERSONAL_O
       (result.events.length > 0 && result.nextCursor === cursor)) {
       throw new Error("Invalid OpenClaw event page");
     }
-    const valid = result.events.filter(validateEvent);
-    const invalid = result.events.filter((event) => !validateEvent(event));
+    // Product group intake has its own journal; it must never become Secretary context.
+    const scoped = result.events.filter((event) => !excludeConversations.includes(event?.conversation_id));
+    const valid = scoped.filter(validateEvent);
+    const invalid = scoped.filter((event) => !validateEvent(event));
     for (const [filename, events] of [[quarantineFile, invalid], [inboxFile, valid]]) {
       if (!events.length) continue;
       const fd = fs.openSync(filename, fs.constants.O_WRONLY | fs.constants.O_CREAT |

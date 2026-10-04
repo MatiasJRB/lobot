@@ -5,6 +5,8 @@ const { ALI_LABEL, consumeAliGroupReplyPermit } = require('../../bridge/ali-grou
 const OUTBOX = process.env.PERSONAL_OS_OPENCLAW_EVENTS_FILE || '/data/personal-os-openclaw-events.ndjson';
 const MAX_TEXT = 4000;
 const KNOWLEDGE_TIMEOUT_MS = 40_000;
+const DECISION_COMMAND = /^DECIDIR [a-z][a-z0-9_]{2,79} V[1-9][0-9]{0,8} [A-Z0-9_-]{1,20}$/;
+const DECISION_CHOICE = /^[A-Z0-9_-]{1,20}$/;
 const ALI_MENTION_RE = /(?:^|[\s([{"'])@lobot\b/i;
 const ALI_MENTION_MAX_AGE_MS = 15 * 60_000;
 
@@ -127,6 +129,38 @@ async function bridgeRequest(baseUrl, token, pathname, options = {}) {
   return payload;
 }
 
+function decisionResponseFrom(event, context, { env = process.env } = {}) {
+  // Group conversation is never a personal card decision, including a bare B.
+  if (env.ALI_GROUP_JID && context?.conversationId === env.ALI_GROUP_JID.trim()) return null;
+  const record = projectReceived(event, context);
+  if (!record || record.modality !== 'text' || record.content_truncated ||
+      (!DECISION_COMMAND.test(record.content_preview) &&
+       !DECISION_CHOICE.test(record.content_preview))) return null;
+  return {
+    version: 1,
+    message_id: record.message_id,
+    account_id: record.account_id,
+    conversation_id: record.conversation_id,
+    sender_id: record.sender_id,
+    occurred_at: record.occurred_at,
+    content: record.content_preview,
+    content_sha256: record.content_sha256,
+  };
+}
+
+async function queueDecisionBridge(payload, {
+  baseUrl = bridgeBaseUrl(),
+  token = process.env.PERSONAL_OS_NOTICE_TOKEN?.trim(),
+  request = bridgeRequest,
+} = {}) {
+  if (!payload) return { queued: false, reason: 'not-a-decision' };
+  if (!baseUrl || !token) throw new Error('Decision bridge is not configured');
+  const result = await request(baseUrl, token, '/personal-os/decisions', {
+    method: 'POST', body: JSON.stringify(payload),
+  });
+  return { queued: true, jobId: result.jobId, created: result.created };
+}
+
 async function queryKnowledgeBridge(query, toolCallId, {
   baseUrl = bridgeBaseUrl(),
   token = process.env.CODEX_BRIDGE_TOKEN?.trim(),
@@ -222,7 +256,9 @@ async function handleAliGroupMention(event, context, {
   // conversationId for WhatsApp groups, even though message_received gets the
   // group JID. The internally built group session key retains the exact JID.
   const sessionGroup = typeof context?.sessionKey === 'string' &&
-    context.sessionKey.endsWith(`:whatsapp:group:${groupJid?.toLowerCase()}`);
+    [`:whatsapp:group:${groupJid?.toLowerCase()}`,
+      `:whatsapp:default:group:${groupJid?.toLowerCase()}`]
+      .some((suffix) => context.sessionKey.endsWith(suffix));
   const exactGroup = event?.isGroup === true &&
     (context?.conversationId === groupJid || sessionGroup);
   if (groupJid && context?.channelId === 'whatsapp' &&
@@ -366,6 +402,11 @@ module.exports = {
       if (!record) return;
       try { appendEvent(record); }
       catch { api.logger?.warn?.('personal-os-events: private outbox unavailable'); }
+      const decision = decisionResponseFrom(event, context);
+      if (decision) {
+        void queueDecisionBridge(decision).catch(() =>
+          api.logger?.warn?.('personal-os-events: decision bridge unavailable'));
+      }
     });
     api.on('message_sent', (event, context) => {
       const record = projectSent(event, context);
@@ -388,6 +429,8 @@ module.exports = {
   bridgeBaseUrl,
   knowledgeTool,
   commitmentTool,
+  decisionResponseFrom,
+  queueDecisionBridge,
   handleAliGroupMention,
   guardAliGroupOutbound,
 };
