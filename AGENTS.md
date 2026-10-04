@@ -7,6 +7,14 @@ cuentas/proyectos. No revertir cambios ajenos ni ampliar permisos por inferencia
 
 ## Circuito humano de Ali
 
+- En el grupo, responder únicamente a una invocación literal `@lobot`. La
+  conversación sin mención se registra silenciosamente; nunca cae al modelo
+  personal. Una respuesta propia de Ali tampoco dispara otra respuesta.
+- Al desplegar Lobot compartido, conservar `before_dispatch`, `message_sending`
+  y los módulos `ali-group*`. Verificar la fuente viva y conciliar cambios de
+  otros antes de publicar: `groupActivation=always` requiere ambos filtros.
+- Un fallo del puente queda pendiente; no habilita una respuesta del modelo
+  personal. Los mensajes del grupo nunca se aplican como decisiones personales.
 - Todo mensaje al grupo en nombre de Ali comienza con `🤖 Ali:` exactamente una
   vez, también en borradores manuales y avisos de publicación. Verificarlo antes
   de la aprobación final; no aplicar la firma a mensajes humanos de Matías.
