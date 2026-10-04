@@ -37,3 +37,35 @@ La configuración sale de la allowlist efectiva del grupo; no inventar identidad
 La activación de recepción y su readback no certifican que un mensaje real se haya capturado. La observación real y los tests locales son evidencias distintas. No afirmar PASS end-to-end hasta observar mensajes reales→clasificación→recibo. No procesar backlog anterior ni los jobs históricos entregados.
 
 El heartbeat humano de este chat revisa salud 09:15/18:15 ART. Permanece silencioso sin novedad material y repara únicamente fallos del intake con tests sin proveedor. Para rollback local, poner `ALI_INTAKE_ENABLED=false` y reinstalar el worker sin trabajos en curso; ejecutar `--disable` en el script de observación para restaurar activación nativa. Preservar journal/outbox y snapshot. No eliminar evidencia ni reenviar respuestas.
+
+## Contrato humano y vista de Joaquín
+
+WhatsApp alcanza como canal humano: consultas, definiciones, reportes de QA y
+bloqueos entran por el grupo autorizado. No exigir a Joaquín seguir commits,
+PRs o Project. La vista privada de Asiento Libre resume su próximo paso,
+las dependencias del equipo y lo que ya reportó; Issues/Project siguen siendo
+la fuente ejecutable. Una respuesta breve no reemplaza registrar trabajo pendiente.
+
+El resumen conserva la distinción reportado/registrado/implementado/verificado.
+Una confirmación de QA no ordena repetir la operación. Preparar código no habilita
+la prueba: el agente de producto debe aportar versión, entorno, enlace/acceso,
+condición de inicio y evidencia esperada. Fuente ambigua o modificada queda en
+revisión. No convertir una Issue cerrada en PASS financiero.
+
+La actualización objetivo de la vista se dispara por cambios materiales en los
+registros, agrupados en las ventanas existentes. Usar proyección determinista:
+sin cambios no hay generación/publicación ni llamadas adicionales al modelo.
+No añadir otro heartbeat ni releer historial. Generar localmente no es publicar:
+conservar fecha del corte, estado de sincronización y recibo de publicación/acceso.
+
+El modelo QA permanece aislado read-only. El escritor sigue acotado a
+Issues/Project de `MatiasJRB/asiento-libre`; el publicador pertenece a la capa
+privada de hosting y requiere su propio alcance autorizado. Este contrato no
+concede acceso a Cloudflare ni autoriza mensajes externos, dinero o deploy.
+Validar cada tramo por separado y no declarar el circuito operativo por una
+preview o por tests. La vista inicial es manual; automatización y respuesta del
+grupo quedan pendientes hasta verificar su implementación real.
+
+El contrato de producto vive en `docs/agents/joaquin-operating-loop.md` del
+repositorio Asiento Libre. Estas reglas no cambian el comportamiento instalado
+del worker ni reemplazan la reconciliación de journal/cursor/recibos.
