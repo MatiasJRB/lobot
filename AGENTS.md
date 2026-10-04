@@ -7,6 +7,9 @@ cuentas/proyectos. No revertir cambios ajenos ni ampliar permisos por inferencia
 
 ## Circuito humano de Ali
 
+- Todo mensaje al grupo en nombre de Ali comienza con `🤖 Ali:` exactamente una
+  vez, también en borradores manuales y avisos de publicación. Verificarlo antes
+  de la aprobación final; no aplicar la firma a mensajes humanos de Matías.
 - WhatsApp es el canal de Joaquín; no exigirle seguir GitHub o commits.
 - Issues/Project son la fuente de trabajo; la vista privada es un resumen humano.
 - Una respuesta rápida no sustituye el registro ni la trazabilidad de un pendiente.

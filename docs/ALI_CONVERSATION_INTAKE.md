@@ -69,3 +69,10 @@ grupo quedan pendientes hasta verificar su implementación real.
 El contrato de producto vive en `docs/agents/joaquin-operating-loop.md` del
 repositorio Asiento Libre. Estas reglas no cambian el comportamiento instalado
 del worker ni reemplazan la reconciliación de journal/cursor/recibos.
+
+Todo texto al grupo en nombre de Ali comienza con `🤖 Ali:` exactamente una vez,
+también si es un borrador manual o aviso de publicación desde el WhatsApp de
+Matías. Verificarlo antes del check final de aprobación; un cambio en un texto
+ya aprobado exige renovar la aprobación completa. El puente automático ya
+normaliza esta firma en la salida y el intake descarta los mensajes rotulados
+como Ali. Los mensajes humanos de Matías conservan su voz y autoría.
