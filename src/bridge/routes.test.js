@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
@@ -202,6 +203,33 @@ test("authorized systems can enqueue a write-only idempotent commitment capture"
     commitment: { ...commitment, deadline_at: "2026-10-23" } })).status, 400);
   assert.equal((await fetch(`${f.url}/jobs`,
     { headers: { authorization: "Bearer notice-only" } })).status, 401);
+});
+
+test("exact WhatsApp decisions enqueue a local idempotent apply with confirmation", async (t) => {
+  const f = await fixture();
+  t.after(() => f.server.close());
+  const content = "DECIDIR choose_waiting_owner V1 B";
+  const payload = { version: 1, message_id: "message-1", account_id: "default",
+    conversation_id: "self", sender_id: "self", occurred_at: "2026-10-03T15:38:12.000Z",
+    content, content_sha256: crypto.createHash("sha256").update(content).digest("hex") };
+  const post = (body, token = "notice-only") => fetch(`${f.url}/personal-os/decisions`, {
+    method: "POST", headers: { authorization: `Bearer ${token}`,
+      "content-type": "application/json" }, body: JSON.stringify(body),
+  });
+  assert.equal((await post(payload, "test-token")).status, 401);
+  const first = await post(payload);
+  const second = await post(payload);
+  assert.equal(first.status, 202);
+  assert.equal(second.status, 200);
+  const body = await first.json();
+  const job = f.store.getJob(body.jobId);
+  assert.equal(job.source, "personal-os-decision-apply");
+  assert.equal(job.reply.channel, "whatsapp-self");
+  assert.equal(job.threadSelector.value, "01a06a2f-947e-7f12-af6c-fd294cf94324");
+  assert.equal((await post({ ...payload, content: "B" })).status, 400);
+  const short = { ...payload, message_id: "message-2", content: "A",
+    content_sha256: crypto.createHash("sha256").update("A").digest("hex") };
+  assert.equal((await post(short)).status, 202);
 });
 
 test("bridge routes reject missing or invalid bearer tokens", async (t) => {

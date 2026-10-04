@@ -76,3 +76,21 @@ Matías. Verificarlo antes del check final de aprobación; un cambio en un texto
 ya aprobado exige renovar la aprobación completa. El puente automático ya
 normaliza esta firma en la salida y el intake descarta los mensajes rotulados
 como Ali. Los mensajes humanos de Matías conservan su voz y autoría.
+
+## Barreras del canal y preservación del despliegue
+
+La sesión del grupo usa `groupActivation=always` para el registro silencioso.
+`requireMention=true` por sí solo no impide que esa sesión invoque el modelo
+personal: el plugin debe consumir **cada** turno del grupo en `before_dispatch`,
+encolando sólo la mención literal `@lobot`. Una falla de cola también se consume;
+no habilita una respuesta alternativa. Las respuestas propias rotuladas Ali se
+ignoran y las decisiones personales nunca toman mensajes de este grupo.
+
+`message_sending` bloquea cualquier salida al grupo que no tenga el permiso
+privado de un solo uso emitido por el puente. El puente firma `🤖 Ali:` una vez.
+Ambos hooks y los tres módulos `ali-group*` deben conservarse al desplegar cambios
+compartidos de Lobot. Restaurar sobre la fuente realmente desplegada y conservar
+las mejoras personales; no sustituirla por un checkout anterior ni reinstalar el
+worker de Mac para reparar sólo el servidor. Validar tests sin proveedor y luego
+configuración efectiva, carga del plugin y salud; la siguiente invocación humana
+real aporta la evidencia de entrega, sin mensajes de prueba ni replay.
