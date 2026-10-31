@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "executionOwner": "existing-worker",
+  "cases": ["demo"],
+  "whatsapp": { "accountId": "default", "self": "+15550000001" }
+}

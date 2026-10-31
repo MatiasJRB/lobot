@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="760" viewBox="0 0 720 760" role="img" aria-labelledby="title desc">
+  <title id="title">Mapa objetivo de Lobot</title>
+  <desc id="desc">Capas objetivo de la infraestructura: agentes y roles; tools, MCP, skills, workflows e integraciones; contexto, memoria y runtimes; contratos, observabilidad y seguridad. No representa un inventario completo ya implementado.</desc>
+  <rect x="1" y="1" width="718" height="758" rx="24" fill="#0b121d" stroke="#2c3b50" stroke-width="2" />
+  <g fill="none" stroke="#78e3be" stroke-width="3">
+    <path d="M360 174V214" />
+    <path d="M360 352V392" />
+    <path d="M360 530V570" />
+    <path d="M351 203L360 213L369 203M351 381L360 391L369 381M351 559L360 569L369 559" />
+  </g>
+  <g fill="#111e2d" stroke="#34495f" stroke-width="2">
+    <rect x="40" y="40" width="640" height="134" rx="16" />
+    <rect x="40" y="218" width="640" height="134" rx="16" />
+    <rect x="40" y="396" width="640" height="134" rx="16" />
+    <rect x="40" y="574" width="640" height="134" rx="16" />
+  </g>
+  <g font-family="Helvetica, Arial, sans-serif">
+    <g fill="#f1f5fb" font-size="36" font-weight="700">
+      <text text-anchor="middle" x="360" y="96" font-family="Helvetica" font-size="36" font-weight="700" fill="#f1f5fb">Agentes y roles</text>
+      <text text-anchor="middle" x="360" y="274" font-size="33" font-family="Helvetica" font-weight="700" fill="#f1f5fb">Tools y workflows</text>
+      <text text-anchor="middle" x="360" y="452" font-size="33" font-family="Helvetica" font-weight="700" fill="#f1f5fb">Contexto y ejecución</text>
+      <text text-anchor="middle" x="360" y="630" font-family="Helvetica" font-size="36" font-weight="700" fill="#f1f5fb">Contratos transversales</text>
+    </g>
+    <g fill="#b8c7da" font-size="26">
+      <text text-anchor="middle" x="360" y="138" font-family="Helvetica" font-size="26" fill="#b8c7da">Responsabilidad · Alcance</text>
+      <text text-anchor="middle" x="360" y="316" font-family="Helvetica" font-size="26" fill="#b8c7da">MCP · Skills · Integraciones</text>
+      <text text-anchor="middle" x="360" y="494" font-family="Helvetica" font-size="26" fill="#b8c7da">Fuentes · Memoria · Runtimes</text>
+      <text text-anchor="middle" x="360" y="672" font-family="Helvetica" font-size="26" fill="#b8c7da">Observabilidad · Seguridad</text>
+    </g>
+  </g>
+  <text text-anchor="middle" x="360" y="742" font-family="Helvetica" font-size="18" fill="#78e3be">MAPA OBJETIVO · INTEGRACIÓN PARCIAL</text>
+</svg>

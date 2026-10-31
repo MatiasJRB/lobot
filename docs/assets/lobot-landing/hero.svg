@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="480" viewBox="0 0 960 480" role="img" aria-labelledby="title desc">
+  <title id="title">Lobot — Infraestructura de agentes y tooling</title>
+  <desc id="desc">Portada oscura de Lobot: infraestructura de agentes y tooling, el sistema detrás de tus agentes. Un diagrama abstracto conecta componentes.</desc>
+  <rect x="1" y="1" width="958" height="478" rx="24" fill="#0b121d" stroke="#2c3b50" stroke-width="2" />
+  <path d="M652 64V416M692 64V416M732 64V416M772 64V416M812 64V416M852 64V416M892 64V416M640 80H912M640 120H912M640 160H912M640 200H912M640 240H912M640 280H912M640 320H912M640 360H912M640 400H912" fill="none" stroke="#263346" stroke-opacity="0.25" />
+  <g fill="none" stroke="#78e3be" stroke-width="3">
+    <path d="M732 116H812V224H732M812 224V332H732" stroke-opacity="0.45" />
+    <path d="M680 224H732" />
+    <rect x="660" y="204" width="40" height="40" rx="11" fill="#122c29" />
+    <rect x="712" y="96" width="40" height="40" rx="11" fill="#122c29" />
+    <rect x="792" y="204" width="40" height="40" rx="11" fill="#122c29" />
+    <rect x="712" y="312" width="40" height="40" rx="11" fill="#122c29" />
+  </g>
+  <g font-family="Helvetica, Arial, sans-serif">
+    <text x="56" y="142" fill="#f1f5fb" font-size="94" font-weight="700" letter-spacing="-4" font-family="Helvetica">Lobot<tspan fill="#78e3be" font-family="Helvetica" font-size="94" font-weight="700">.</tspan>
+    </text>
+    <rect x="58" y="182" width="64" height="5" rx="2.5" fill="#78e3be" />
+    <text x="56" y="274" fill="#f1f5fb" font-size="56" font-weight="700" letter-spacing="-1.5" font-family="Helvetica">El sistema detrás</text>
+    <text x="56" y="342" fill="#f1f5fb" font-size="56" font-weight="700" letter-spacing="-1.5" font-family="Helvetica">de tus agentes.</text>
+    <text x="58" y="425" fill="#b8c7da" font-size="26" font-family="Helvetica">Infraestructura de agentes y tooling</text>
+  </g>
+</svg>
