@@ -20,7 +20,11 @@ Quiero que vaya creciendo con orden y poder volver a entender por qué armé cad
 
 ![Mi mapa de trabajo: agentes y roles, tools y workflows, contexto y ejecución, contratos y seguridad. Es un mapa por completar.](docs/assets/lobot-landing/flow.svg)
 
-Este mapa todavía está por completar. La revisión hecha hasta ahora cubre sólo Lobot; no tengo toda mi infraestructura inventariada ni integrada acá.
+Este mapa todavía está por completar. El inventario reúne código de Lobot y referencias a piezas externas según la evidencia disponible; no tengo toda mi infraestructura auditada ni integrada acá.
+
+Estoy registrando las piezas que ya tengo en el [mapa de mi infraestructura](docs/MAPA_INFRAESTRUCTURA.md): el núcleo de asuntos, entornos de agentes, memoria y contexto, Captura, comunicación, medios y proyectos anteriores. El [registro de evidencia](docs/INVENTARIO_EVIDENCIA.md) distingue lo instalado, configurado, observado e histórico. En esta etapa estoy plasmando lo existente y sus relaciones; las conexiones pendientes no son un pedido de implementación.
+
+También dejé un [mapa gráfico por funciones](docs/MAPA_VISUAL.md) y una [nota sobre qué quiero compartir y qué parametrizar](docs/COMPARTIR_LOBOT.md).
 
 Investigación, desarrollo, borradores o un Secretario son algunas aplicaciones posibles. WhatsApp es uno de los canales. Lo que quiero ordenar en este repo es la infraestructura que puede sostener esas piezas.
 
@@ -32,7 +36,7 @@ Hoy Remote Station vive en la skill local `remote-station`, con sus scripts y re
 
 ## Una pieza concreta: el kit offline
 
-Lo que ya está preparado acá es un kit de adaptadores: configuración explícita y conexiones con Dot, WhatsApp, OpenClaw y Codex. Reutiliza la cola y el ejecutor del host existente. Es una pieza de este espacio, no una instalación de toda mi infraestructura.
+Lo que ya está preparado acá es un kit de adaptadores: configuración explícita e interfaces para Dot, WhatsApp, OpenClaw y Codex. Reutiliza la cola y el ejecutor del host existente. Es una pieza de este espacio, no una instalación de toda mi infraestructura.
 
 El bootstrap y la verificación funcionan de forma aislada con Node 24+: generan un artefacto de 15 archivos, sin dependencias de paquete, y sus seis módulos se pueden importar sin el host. La integración real del kit con ese host sigue pendiente.
 
@@ -50,6 +54,6 @@ La configuración real queda fuera de la distribución. No incluyo secretos ni c
 
 ## Por dónde quiero seguir
 
-Completar el mapa de lo que uso, documentar las decisiones que hoy están dispersas y mejorar una pieza a la vez. El kit de adaptadores y Remote Station son dos lugares concretos para seguir ese trabajo, cada uno con sus pendientes.
+Seguir plasmando lo que ya tengo, dónde vive y cómo se relaciona. Voy a ampliar el inventario y documentar las decisiones que hoy están dispersas, conservando la diferencia entre una pieza registrada y una integración verificada.
 
 Código bajo [licencia MIT](LICENSE), conservando la atribución existente.
