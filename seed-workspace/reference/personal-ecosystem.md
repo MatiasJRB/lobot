@@ -2,8 +2,8 @@
 
 ## Cuentas
 
-- Google personal: `matiasjriosb@gmail.com`.
-- GitHub personal: `MatiasJRB`.
+- Google personal: `usuario@example.com`.
+- GitHub personal: `usuario-ejemplo`.
 - Zona horaria: Buenos Aires (`America/Argentina/Buenos_Aires`).
 
 ## Fuentes candidatas para revisar
@@ -19,7 +19,7 @@
    - Vencimientos recurrentes que ya aparecen como calendarios o `.ics`.
 
 3. **GitHub**
-   - Notificaciones del usuario `MatiasJRB`.
+   - Notificaciones del usuario `usuario-ejemplo`.
    - CI fallidas, menciones, PRs/issues asignados, security/dependabot alerts.
    - Repos personales y proyectos propios; evitar mezclar backlog laboral Mango.
 

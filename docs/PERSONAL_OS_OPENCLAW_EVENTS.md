@@ -9,7 +9,7 @@ No hook sends a message or authorizes a financial action.
 The plugin appends bounded records to `/data/personal-os-openclaw-events.ndjson`
 (0600). The bearer-protected `/bridge/api/personal-os/events` route pages this
 file by byte cursor. The existing Mac bridge worker polls it into
-`/Users/matiasrios/Documents/Codex/personal-organization/private/openclaw-events.ndjson`
+`/home/usuario/Documents/Codex/personal-organization/private/openclaw-events.ndjson`
 and stores a durable cursor beside it (both 0600). Invalid legacy records go
 to `openclaw-events-quarantine.ndjson` (0600), so a cold replay cannot be
 blocked by the first pre-fix timestamp error. A failed pull does not advance

@@ -31,7 +31,7 @@ OPENCLAW_DEFAULT_MODEL=google/gemini-3.1-flash-lite
 La clave Gemini quedó guardada localmente fuera del repo en:
 
 ```text
-/Users/matiasrios/Documents/GitHub/personal-assistant-secrets/gemini-api-key-details.txt
+/home/usuario/Documents/GitHub/personal-assistant-secrets/gemini-api-key-details.txt
 ```
 
 No copiar ese archivo al repo. Pegar solo el valor de la key como variable secreta de Railway.
@@ -58,11 +58,11 @@ El `node` de Homebrew puede fallar por una dependencia `libsimdjson.26.dylib`.
 Para automatizar Railway desde Codex/local, usar el Node bundled:
 
 ```text
-/Users/matiasrios/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node
+/home/usuario/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node
 ```
 
 con el CLI instalado en:
 
 ```text
-/Users/matiasrios/.nvm/versions/node/v20.19.4/lib/node_modules/@railway/cli/bin/railway.js
+/home/usuario/.nvm/versions/node/v20.19.4/lib/node_modules/@railway/cli/bin/railway.js
 ```

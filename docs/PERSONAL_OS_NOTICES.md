@@ -4,7 +4,7 @@ Los sistemas productores **no** deben usar `send_message_to_thread` ni `/bridge/
 
 ## Publicar
 
-`POST https://clawbot-personal-openclaw-production.up.railway.app/bridge/api/personal-os/notices`
+`POST https://tu-instalacion.example.com/bridge/api/personal-os/notices`
 
 Autenticación: `Authorization: Bearer <PERSONAL_OS_NOTICE_TOKEN>`, credencial de **sólo escritura**. No utilizar `CODEX_BRIDGE_TOKEN` en productores. El cuerpo JSON acepta exactamente:
 
@@ -22,7 +22,7 @@ Autenticación: `Authorization: Bearer <PERSONAL_OS_NOTICE_TOKEN>`, credencial d
 
 `source`, `eventId`, `title`, `summary`, `occurredAt` son obligatorios. `importance` es `normal` (por defecto) o `high`; `cardId` sólo es una pista. Respuesta `202 {ok:true,id,created:true}`; un reintento idéntico devuelve `200 created:false`; el mismo ID con otro contenido devuelve `400`. Para reintentos, conservar exactamente el mismo evento y fecha. No enviar secretos, transcripciones ni datos financieros innecesarios en `summary`.
 
-En la Mac, usar `/Users/matiasrios/Documents/Codex/personal-organization/bin/avisar-secretario`; lee la URL y la credencial de `~/.config/secretario-personal/notice-client.json` (0600). El skill personal `avisar-secretario` enseña este flujo a otros agentes Codex.
+En la Mac, usar `/home/usuario/Documents/Codex/personal-organization/bin/avisar-secretario`; lee la URL y la credencial de `~/.config/secretario-personal/notice-client.json` (0600). El skill personal `avisar-secretario` enseña este flujo a otros agentes Codex.
 
 ## Recepción y límites
 

@@ -74,7 +74,7 @@ POST /setup/api/crons/install-personal-os
 
 Cada cron ejecuta `src/cron/dispatch-codex-review.js`, encola un job idempotente
 en el task exacto `Secretario personal` y fija como directorio de trabajo
-`/Users/matiasrios/Documents/Codex/personal-organization`. El worker Mac realiza
+`/home/usuario/Documents/Codex/personal-organization`. El worker Mac realiza
 la revisión, actualiza las fuentes locales y el puente entrega el resultado al
 WhatsApp propio de Matías. OpenClaw usa `--no-deliver` para no duplicar el
 mensaje ni involucrar a Gemini.
@@ -118,7 +118,7 @@ POST /setup/api/crons/install-accountant
 
 Cada cron ejecuta `src/cron/dispatch-accountant.js`, encola un job idempotente
 en el task exacto `Investigar reemplazo del contador` y fija como directorio de
-trabajo `/Users/matiasrios/Documents/GitHub/ops`. OpenClaw no entrega el stdout
+trabajo `/home/usuario/Documents/GitHub/ops`. OpenClaw no entrega el stdout
 del comando: la respuesta final vuelve exclusivamente por el bridge.
 
 Los jobs de monitoreo y pago usan `reply.policy=actionable-only`. Una respuesta
@@ -204,7 +204,7 @@ CODEX_BRIDGE_TOKEN=<mismo secreto>
 CODEX_BRIDGE_WORKER_ID=matias-mac
 CODEX_PATH=/ruta/absoluta/a/codex
 CODEX_BRIDGE_NODE_PATH=/ruta/absoluta/a/node
-CODEX_BRIDGE_DEFAULT_CWD=/Users/matiasrios/Documents/GitHub
+CODEX_BRIDGE_DEFAULT_CWD=/home/usuario/Documents/GitHub
 ```
 
 Instalar o reinstalar el worker:
