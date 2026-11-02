@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="480" viewBox="0 0 960 480" role="img" aria-labelledby="title desc">
+  <title id="title">Lobot — Mi infraestructura de agentes y tooling</title>
+  <desc id="desc">Lobot, mi infraestructura de agentes y tooling. Código y notas de lo que uso. Portada oscura con líneas de cuaderno.</desc>
+  <rect x="1" y="1" width="958" height="478" rx="24" fill="#0b121d" stroke="#2c3b50" stroke-width="2" />
+  <g fill="none" stroke="#2c3b50" stroke-width="2">
+    <path d="M708 104H876M708 152H876M708 200H876M708 248H876M708 296H876M708 344H876" />
+    <path d="M688 80V368" stroke="#78e3be" stroke-opacity="0.5" />
+  </g>
+  <g font-family="Helvetica, Arial, sans-serif">
+    <text x="56" y="142" fill="#f1f5fb" font-size="94" font-weight="700" letter-spacing="-4" font-family="Helvetica">Lobot<tspan fill="#78e3be" font-family="Helvetica" font-size="94" font-weight="700">.</tspan>
+    </text>
+    <rect x="58" y="182" width="64" height="5" rx="2.5" fill="#78e3be" />
+    <text x="56" y="274" fill="#f1f5fb" font-size="48" font-weight="700" letter-spacing="-1.5" font-family="Helvetica">Mi infraestructura</text>
+    <text x="56" y="342" fill="#f1f5fb" font-size="48" font-weight="700" letter-spacing="-1.5" font-family="Helvetica">de agentes y tooling.</text>
+    <text x="58" y="425" fill="#b8c7da" font-size="26" font-family="Helvetica">Código y notas de lo que uso.</text>
+  </g>
+</svg>

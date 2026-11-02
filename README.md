@@ -1,123 +1,46 @@
-# Secretario Personal — OpenClaw en Railway
+![Lobot. Mi infraestructura de agentes y tooling. Código y notas de lo que uso.](docs/assets/lobot-landing/hero.svg)
 
-Base para el secretario personal de Matías: OpenClaw desplegado en Railway,
-Gemini para la capa de entrega y un puente seguro entre WhatsApp y los hilos de
-Codex en la Mac.
+# Lobot
 
-## Qué hace esta base
+**Mi infraestructura de agentes y tooling.**
 
-- Corre OpenClaw detrás de un setup wrapper web para Railway.
-- Persiste estado/workspace en `/data`.
-- Usa `GEMINI_API_KEY` desde variables Railway.
-- Usa `DISCORD_BOT_TOKEN` desde variables Railway con SecretRef.
-- Siembra instrucciones de secretario personal en el workspace.
-- Incluye collectors server-side para Gmail, Google Calendar y GitHub.
-- Incluye scripts para crear/editar tres digests diarios por Discord usando
-  OpenClaw command cron jobs.
-- Incluye una cola durable en Railway y un worker saliente para consultar o
-  disparar un hilo de Codex elegido desde WhatsApp.
-- Puede programar las revisiones semanal y mensual del Sistema Operativo
-  Personal en el task exacto `Secretario personal` y devolverlas al WhatsApp
-  propio mediante el puente, sin pasar por Gemini.
-- Puede operar el contador autónomo por excepción: OpenClaw dispara controles
-  fiscales, facturación y verificación de pagos en el task exacto de Codex; los
-  resultados sanos quedan silenciosos y solo las excepciones o aprobaciones
-  vuelven al WhatsApp propio.
+Acá reúno código y documentación del sistema que uso detrás de mis agentes: puentes entre canales, herramientas MCP, ejecución, contexto y formas de trabajar.
 
-## Documentación del proyecto
+Lo mantengo para entender qué hace cada pieza, mejorarla y poder cambiarla sin perder lo que ya funciona. Comparto lo que pueda servirle a alguien más, con sus límites a la vista.
 
-- `docs/ARCHITECTURE.md` — arquitectura y decisiones.
-- `docs/RAILWAY_DEPLOYMENT.md` — variables y deploy.
-- `docs/DISCORD_SETUP.md` — bot/canal/permissions.
-- `docs/OPERATIONS.md` — operación diaria y cron.
-- `docs/SOURCES_AND_AUTOMATION_ROADMAP.md` — fuentes personales y roadmap.
-- `docs/CODEX_WHATSAPP_BRIDGE.md` — spec, arquitectura y operación del puente.
-- `docs/ACCOUNTANT_AUTOPILOT.md` — contrato del contador autónomo por excepción.
+## Qué contiene este repo
 
-## Setup rápido
+- `src/bridge` y `src/cli`: el puente con el ejecutor local, su cola y las herramientas para consultar o encargar trabajo.
+- `src/mcp` y `src/personal-os`: conectores e interfaces acotadas con Personal OS, que conserva sus datos y reglas de dominio.
+- `src/personal` y `src/cron`: collectors y mecanismos de revisión o avisos que forman parte de la historia de la instalación.
+- `docs`, scripts y `seed-workspace`: arquitectura, guías y bases de configuración del host. Algunas guías describen etapas anteriores; no son instrucciones para activar hoy esos mecanismos.
 
-1. Deploy en Railway desde este repo.
-2. Agregar Volume montado en `/data`.
-3. Setear variables desde `.env.example`.
-4. Abrir `/setup`, correr onboarding y luego `/openclaw`.
-5. Configurar Discord pairing.
-6. Ejecutar `scripts/install-personal-crons.sh` (digests) y `scripts/install-reactive-alert-cron.sh` (alertas reactivas P0/P1) cuando el gateway esté listo.
-7. Agregar credenciales para Gmail/Calendar/GitHub (Calendar puede incluir write de eventos) en Railway.
+Uso Dot para coordinación y seguimiento según las capacidades probadas de cada flujo. El host conserva la cola durable y el único ejecutor de cada asunto; Lobot aporta los puentes y el respaldo local. Esa relación no significa que Dot conecte automáticamente todas las piezas de este repo.
 
-## Fuentes reales
+Investigación, desarrollo, borradores y un Secretario son aplicaciones de esta infraestructura. WhatsApp es uno de sus canales.
 
-El comando de digest vive en:
+![Mapa de componentes de Lobot. No representa un recorrido integrado.](docs/assets/lobot-landing/flow.svg)
 
-```bash
-node src/cron/run-personal-digest.js --slot morning
-```
+## Estado del código y de la instalación
 
-Ese comando:
+El código publicado y mi instalación personal no son lo mismo. El árbol conserva componentes del host y mecanismos históricos; su presencia no prueba que estén activos. Tampoco una prueba offline acredita una integración en producción.
 
-- Lee Gmail con Gmail API metadata/snippets, sin descargar cuerpos completos.
-- Lee Google Calendar para agenda próxima, cancelaciones y conflictos.
-- Lee GitHub notifications/search/Actions recientes del usuario `MatiasJRB`.
-- Usa Gemini para redactar/priorizar si `GEMINI_API_KEY` está disponible.
-- Si Gemini falla, genera un digest determinístico para no perder avisos.
+En la instalación se documentaron recorridos reales y acotados entre Dot, Personal OS y el ejecutor existente, incluida lectura de avisos y acuse de evaluación con reintento sobre un aviso técnico propio, sin envío humano. Parte de esas mejoras todavía no está consolidada en este `main`: no presento esa evidencia como una funcionalidad lista para usar al clonar.
 
-Endpoints de setup útiles:
+También hay un kit offline preparado por separado para adaptadores de Dot, WhatsApp, OpenClaw y Codex. Su bootstrap e imports aislados se verificaron con Node 24; necesita integrarse con el host y **no está incluido en esta entrega de portada**.
 
-- `GET /setup/api/personal/sources/status`
-- `GET /setup/api/personal/digest?format=markdown`
-- `GET /setup/api/personal/digest?format=markdown&ai=1`
-- `GET /setup/api/personal/digest?format=json`
+## Lo que sigue en su lugar de origen
 
-Todos requieren `SETUP_PASSWORD`.
+Las skills externas conservan sus scripts y referencias donde están instaladas. Captura y HomeOps tienen sus propios proyectos y responsabilidades; acá interesa su relación con los agentes, sin dar por hechas integraciones.
 
-## Puente WhatsApp ↔ Codex Mac
+Remote Station también forma parte del mapa: la Mac conserva UI, repos canónicos y tareas macOS; la estación privada sirve para builds, tests y backends Linux según el contrato de cada proyecto. Su implementación sigue en la skill local `remote-station`; no se migró a Lobot.
 
-La API autenticada vive bajo `/bridge/api`. OpenClaw usa
-`src/cli/codex-bridge.js` para listar hilos o encolar pedidos; un LaunchAgent en
-la Mac ejecuta `src/bridge/worker.js`, consulta Railway mediante conexión
-saliente y controla `codex app-server --stdio` localmente.
+## Portabilidad y próximos pasos
 
-```bash
-# En Railway/OpenClaw
-node /app/src/cli/codex-bridge.js threads
-node /app/src/cli/codex-bridge.js enqueue \
-  --thread "Organiza trámites" \
-  --prompt "Revisá el estado de salud y decime el próximo paso"
+Clonar este repo no instala toda mi infraestructura. Para reutilizar una pieza hay que revisar su contrato, dependencias, rutas y configuración. No ofrezco un instalador general ni una receta que conecte cuentas o active servicios.
 
-# En la Mac, con CODEX_BRIDGE_URL y CODEX_BRIDGE_TOKEN configurados
-pnpm bridge:worker:once
-```
+Las credenciales, cuentas y configuración real deben quedar fuera de los ejemplos distribuibles. Esta actualización de portada no certifica que la historia completa sea apta para exposición pública: su revisión y saneamiento son un paso separado.
 
-Los selectores aceptados son `recent`, `new`, ID exacto o título/frase única.
-El modo predeterminado es `read-only`; `workspace-write` debe pedirse de forma
-explícita. El instalador local está en
-`scripts/install-codex-bridge-launch-agent.sh`.
+Sigo consolidando el inventario, los contratos y la evidencia de cada componente. Una capacidad inventariada, un experimento terminado y un aviso no son automáticamente trabajo pendiente. Conservo lo aprendido y continúo lo autorizado con su dueño, sin duplicar backlogs ni sumar otro supervisor.
 
-## Secreto Gemini
-
-La API key real no vive en este repo. Está guardada localmente en:
-
-```text
-/Users/matiasrios/Documents/GitHub/personal-assistant-secrets/gemini-api-key-details.txt
-```
-
-Ese directorio está gitignored desde el root del workspace.
-
-## Alertas reactivas y acciones
-
-- **Alertas reactivas**: instalá el cron con `POST /setup/api/crons/install-reactive` (vía canónica, como los digests; el script `scripts/install-reactive-alert-cron.sh` es solo el equivalente shell). Corre `src/cron/run-reactive-alert.js` en alta frecuencia. Reusa los collectors del digest, filtra a P0 por default (`REACTIVE_ALERT_MIN_PRIORITY`) y a Gmail/Calendar (`REACTIVE_ALERT_SOURCES`; GitHub se queda en el digest) y solo avisa por señales **nuevas** — deduplica contra un store persistente (`/data/personal-reactive-state.json`), así que si no hay novedad no postea nada. Inspección sin postear:
-
-```bash
-node src/cron/run-reactive-alert.js --format json --dry-run
-```
-
-- **Acciones (reportar → actuar)**, siempre con `--confirm`:
-  - Calendar: `node src/cli/calendar-event.js` (`create`/`update`/`delete`), requiere `CALENDAR_WRITE_ENABLED=true`.
-  - Gmail (borradores, **nunca envía**): `node src/cli/gmail-action.js draft`, requiere `GMAIL_WRITE_ENABLED=true` y scope `gmail.compose` en el refresh token.
-
-## Upstream/docs relevantes
-
-- OpenClaw: https://github.com/openclaw/openclaw
-- Railway: https://docs.openclaw.ai/install/railway
-- Discord: https://docs.openclaw.ai/channels/discord
-- Cron jobs: https://docs.openclaw.ai/automation/cron-jobs
-- Model providers: https://docs.openclaw.ai/concepts/model-providers
+Código bajo [licencia MIT](LICENSE), conservando la atribución existente.
